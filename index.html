@@ -237,14 +237,6 @@
   .file-btn{cursor:pointer;}
   .file-btn input{display:none;}
 
-  /* ---------- SYNC STATUS INDICATOR ---------- */
-  @keyframes spin{0%{transform:rotate(0deg);} 100%{transform:rotate(360deg);}}
-  #syncStatus{transition:color .3s;}
-  #syncIcon{display:inline-block;}
-  #syncStatus.syncing #syncIcon{animation:spin .8s linear infinite;}
-  #syncStatus.synced{color:#3F7A5E;}
-  #syncStatus.offline{color:#7A8496;}
-
   /* ---------- RESPONSIVE ---------- */
   @media (max-width:900px){
     .menu-toggle{display:flex;}
@@ -329,9 +321,6 @@
         </div>
       </div>
       <div class="topbar-right">
-        <span id="syncStatus" style="font-size:12px;color:#7A8496;display:flex;align-items:center;gap:5px;">
-          <span id="syncIcon">⊙</span><span id="syncText">Hors ligne</span>
-        </span>
         <span id="topbarUserRole"></span>
         <button class="btn sm" id="installAppBtn" onclick="installApp()" style="display:none;">📲 Installer</button>
         <button class="btn sm accent" onclick="openShareModal()">Partager</button>
@@ -372,24 +361,6 @@
     <div id="resetPwResult"></div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal('modalResetPw')">Fermer</button>
-    </div>
-  </div>
-</div>
-
-<div class="modal-overlay" id="modalFirstLoginChangePw">
-  <div class="modal-card">
-    <h3>Changez votre mot de passe</h3>
-    <p class="subtle">Première connexion — veuillez définir un nouveau mot de passe personnel.</p>
-    <label>Ancien mot de passe</label>
-    <input type="password" id="firstLoginOldPw" disabled value="5599" style="background:#f0f0f0;">
-    <label>Nouveau mot de passe</label>
-    <input type="password" id="firstLoginNewPw" placeholder="Entrez un mot de passe" onkeypress="if(event.key==='Enter') doFirstLoginChangePw();">
-    <label>Confirmer</label>
-    <input type="password" id="firstLoginConfirmPw" placeholder="Confirmez le mot de passe" onkeypress="if(event.key==='Enter') doFirstLoginChangePw();">
-    <div id="firstLoginError" style="color:var(--danger);font-size:12px;margin-top:10px;display:none;"></div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeModal('modalFirstLoginChangePw')">Annuler</button>
-      <button class="btn accent" onclick="doFirstLoginChangePw()">Confirmer et continuer</button>
     </div>
   </div>
 </div>
@@ -559,29 +530,19 @@ function nextMatricule(){ return String(2600 + ELEVES.length + 1); }
 // NB (prototype) : les mots de passe apparaissent en clair pour la démo.
 // En production, ils doivent être hachés côté serveur / Firebase Auth —
 // même le compte développeur ne devrait forcer qu'une réinitialisation.
-let USERS = [
-  {id: 'dev-default', login: 'Wais', nom: 'Wais', role:'developpeur', pass:'5599', poste:'Développeur plateforme'}
-];
-let firstLoginWithDefaultPass = false;
+let USERS = [];
 const ROLE_LABELS = {direction:'Proviseur', enseignant:'Enseignant', surveillant:'Surveillant', developpeur:'Développeur'};
 let currentUser = null;
 
-function loadUsersFromLocal(){
-  try{
-    const saved = localStorage.getItem('hotellerie-users');
-    if(saved) USERS = JSON.parse(saved);
-  }catch(e){}
-}
-function saveUsersToLocal(){
-  localStorage.setItem('hotellerie-users', JSON.stringify(USERS));
-}
-
-loadUsersFromLocal();
-
 function showLoginScreen(){
   document.getElementById('loginScreen').style.display = 'flex';
-  document.getElementById('loginCardNormal').style.display = 'block';
-  document.getElementById('loginCardSetup').style.display = 'none';
+  if(USERS.length === 0){
+    document.getElementById('loginCardNormal').style.display = 'none';
+    document.getElementById('loginCardSetup').style.display = 'block';
+  } else {
+    document.getElementById('loginCardNormal').style.display = 'block';
+    document.getElementById('loginCardSetup').style.display = 'none';
+  }
 }
 
 function completeLogin(user){
@@ -601,7 +562,6 @@ function createFirstAccount(){
   if(!nom || !login || !pass){ document.getElementById('setupError').style.display = 'block'; return; }
   const user = {id: uid('u'), login, nom, role:'developpeur', pass, poste:'Développeur plateforme'};
   USERS.push(user);
-  saveUsersToLocal();
   completeLogin(user);
 }
 
@@ -610,15 +570,7 @@ function attemptLogin(){
   const p = document.getElementById('loginPass').value;
   const found = USERS.find(x=>x.login===u && x.pass===p);
   if(!found){ document.getElementById('loginError').style.display = 'block'; return; }
-  
-  // Si le mot de passe est encore le défaut (5599), forcer le changement
-  if(found.pass === '5599'){
-    currentUser = found;
-    openModal('modalFirstLoginChangePw');
-    document.getElementById('firstLoginOldPw').value = '5599';
-  } else {
-    completeLogin(found);
-  }
+  completeLogin(found);
 }
 function logout(){
   currentUser = null;
@@ -1319,7 +1271,6 @@ function createTeacher(){
   const tempPass = genPassword();
   const defaultPoste = role==='direction' ? 'Proviseur' : role==='developpeur' ? 'Développeur plateforme' : role==='surveillant' ? 'Surveillant' : 'Enseignant';
   USERS.push({id: uid('u'), login, nom:name, role, pass:tempPass, poste: document.getElementById('newTeacherSubject').value.trim() || defaultPoste});
-  saveUsersToLocal();
   ['newTeacherName','newTeacherSubject','newTeacherLogin'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('newTeacherRole').value = 'enseignant';
   closeModal('modalAddTeacher');
@@ -1339,37 +1290,9 @@ function doResetPassword(){
   const u = USERS.find(x=>x.id===resetTargetId);
   const newPass = genPassword();
   u.pass = newPass;
-  saveUsersToLocal();
   document.getElementById('resetPwResult').innerHTML = `<div class="pw-reveal">Nouveau mot de passe : ${newPass}</div>`;
   renderUsersPage();
   scheduleSave();
-}
-
-function doFirstLoginChangePw(){
-  const newPw = document.getElementById('firstLoginNewPw').value.trim();
-  const confirm = document.getElementById('firstLoginConfirmPw').value.trim();
-  const err = document.getElementById('firstLoginError');
-  
-  if(!newPw || !confirm){
-    err.textContent = 'Veuillez remplir tous les champs.';
-    err.style.display = 'block';
-    return;
-  }
-  if(newPw !== confirm){
-    err.textContent = 'Les mots de passe ne correspondent pas.';
-    err.style.display = 'block';
-    return;
-  }
-  if(newPw.length < 4){
-    err.textContent = 'Le mot de passe doit faire au moins 4 caractères.';
-    err.style.display = 'block';
-    return;
-  }
-  
-  currentUser.pass = newPw;
-  saveUsersToLocal();
-  closeModal('modalFirstLoginChangePw');
-  completeLogin(currentUser);
 }
 
 /* ============================================================
@@ -1519,7 +1442,6 @@ function updateFirebaseStatus(){
   if(ok) ok.style.display = firebaseReady ? 'block' : 'none';
   if(adv) adv.style.display = firebaseReady ? 'none' : 'block';
   if(warn) warn.style.display = firebaseReady ? 'none' : 'block';
-  updateSyncStatus();
 }
 function toggleAdvancedFirebase(){
   const adv = document.getElementById('firebaseAdvanced');
@@ -1556,75 +1478,31 @@ async function loadStateFromFirestore(){
       if(data.ENSEIGNANTS) ENSEIGNANTS = data.ENSEIGNANTS;
       if(data.NOTES) NOTES = data.NOTES;
       if(data.EXAMENS) EXAMENS = data.EXAMENS;
-      if(data.USERS){
-        const existingIds = new Set(USERS.map(u=>u.id));
-        const newUsers = data.USERS.filter(u=>!existingIds.has(u.id));
-        USERS.push(...newUsers);
-      }
+      if(data.USERS) USERS = data.USERS;
     }
   }catch(err){
     console.error('Chargement Firestore impossible :', err);
   }
 }
 let saveTimer = null;
-let lastSyncTime = null;
-
-function updateSyncStatus(){
-  const el = document.getElementById('syncStatus');
-  const icon = document.getElementById('syncIcon');
-  const text = document.getElementById('syncText');
-  if(!el) return;
-  
-  if(!firebaseReady || !db){
-    el.className = 'offline';
-    icon.textContent = '⊙';
-    text.textContent = 'Hors ligne';
-  } else {
-    el.className = 'synced';
-    icon.textContent = '✓';
-    if(lastSyncTime){
-      const now = new Date();
-      const diff = Math.round((now - lastSyncTime) / 1000);
-      text.textContent = diff < 60 ? 'À l\'instant' : diff < 3600 ? `Il y a ${diff}s` : 'Synchronisé';
-    } else {
-      text.textContent = 'Connecté';
-    }
-  }
-}
-
-function showSyncing(){
-  const el = document.getElementById('syncStatus');
-  const icon = document.getElementById('syncIcon');
-  const text = document.getElementById('syncText');
-  if(!el) return;
-  el.className = 'syncing';
-  icon.textContent = '⟳';
-  text.textContent = 'Synchronisation...';
-}
-
 function scheduleSave(){
   if(!firebaseReady || !db) return;
   clearTimeout(saveTimer);
-  showSyncing();
   saveTimer = setTimeout(saveStateToFirestore, 800);
 }
-
 async function saveStateToFirestore(){
   if(!firebaseReady || !db) return;
   try{
     await db.collection('app').doc('state').set(stateForSync());
-    lastSyncTime = new Date();
-    updateSyncStatus();
   }catch(err){
     console.error('Sauvegarde Firestore impossible :', err);
-    updateSyncStatus();
   }
 }
 (function(){
   const saved = localStorage.getItem('firebaseConfig');
   const ok = saved ? tryInitFirebase(saved) : tryInitFirebase(JSON.stringify(DEFAULT_FIREBASE_CONFIG));
   if(ok){
-    loadStateFromFirestore().finally(()=>{ updateFirebaseStatus(); updateSyncStatus(); showLoginScreen(); });
+    loadStateFromFirestore().finally(()=>{ updateFirebaseStatus(); showLoginScreen(); });
   } else {
     showLoginScreen();
   }
@@ -1718,9 +1596,6 @@ function nativeShare(){
   if(!navigator.share) return;
   navigator.share({title:'Hôtellerie', text:'Accédez à Hôtellerie :', url: appShareUrl()}).catch(()=>{});
 }
-
-// Mise à jour en direct de l'indicateur de synchronisation toutes les secondes
-setInterval(updateSyncStatus, 1000);
 </script>
 </body>
 </html>
