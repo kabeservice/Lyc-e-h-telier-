@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Plateforme Scolaire</title>
+<title>Hôtellerie</title>
 
 <!-- PWA -->
 <link rel="manifest" href="manifest.json">
@@ -269,7 +269,7 @@
 <!-- ============ ECRAN DE CONNEXION ============ -->
 <div class="login-screen" id="loginScreen">
   <div class="login-card" id="loginCardNormal">
-    <div class="login-brand">Plateforme Scolaire</div>
+    <div class="login-brand">Hôtellerie</div>
     <div class="login-sub">Connectez-vous avec votre identifiant</div>
 
     <label>Identifiant</label>
@@ -302,7 +302,7 @@
   <!-- ============ SIDEBAR ============ -->
   <aside class="sidebar" id="sidebar">
     <div class="brand">
-      <div class="brand-name">École — Direction</div>
+      <div class="brand-name">Hôtellerie — Direction</div>
       <div class="brand-sub">Année scolaire 2026 – 2027</div>
     </div>
     <nav class="nav" id="nav"></nav>
@@ -1377,6 +1377,18 @@ function handlePhotoUpload(eleveId, files){
 /* ============================================================
    FIRESTORE (facultatif)
    ============================================================ */
+// Config Firebase du projet (collée depuis la console Firebase).
+// Utilisée automatiquement au premier chargement si aucune config n'a
+// encore été enregistrée localement (voir bloc d'auto-connexion plus bas).
+const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDo54rshWzdSfaOyf6Eq2UIj7swQ5ATcT4",
+  authDomain: "scolaire-c747d.firebaseapp.com",
+  projectId: "scolaire-c747d",
+  storageBucket: "scolaire-c747d.firebasestorage.app",
+  messagingSenderId: "646415728662",
+  appId: "1:646415728662:web:1489ca4e5ab0270b9b7537"
+};
+
 let db = null;
 let firebaseReady = false;
 function tryInitFirebase(configStr){
@@ -1411,6 +1423,7 @@ function updateFirebaseStatus(){
 (function(){
   const saved = localStorage.getItem('firebaseConfig');
   if(saved) tryInitFirebase(saved);
+  else tryInitFirebase(JSON.stringify(DEFAULT_FIREBASE_CONFIG));
 })();
 
 showLoginScreen();
@@ -1433,8 +1446,8 @@ function appShareUrl(){
 function openShareModal(){
   const url = appShareUrl();
   document.getElementById('shareUrlInput').value = url;
-  document.getElementById('shareWhatsapp').href = 'https://wa.me/?text=' + encodeURIComponent('Plateforme Scolaire — accédez à l\'application ici : ' + url);
-  document.getElementById('shareEmail').href = 'mailto:?subject=' + encodeURIComponent('Plateforme Scolaire') + '&body=' + encodeURIComponent('Bonjour,\n\nVoici le lien vers la Plateforme Scolaire :\n' + url + '\n\nVous pouvez l\'ouvrir dans votre navigateur, puis l\'installer sur votre téléphone via "Ajouter à l\'écran d\'accueil" / "Installer l\'application".');
+  document.getElementById('shareWhatsapp').href = 'https://wa.me/?text=' + encodeURIComponent('Hôtellerie — accédez à l\'application ici : ' + url);
+  document.getElementById('shareEmail').href = 'mailto:?subject=' + encodeURIComponent('Hôtellerie') + '&body=' + encodeURIComponent('Bonjour,\n\nVoici le lien vers Hôtellerie :\n' + url + '\n\nVous pouvez l\'ouvrir dans votre navigateur, puis l\'installer sur votre téléphone via "Ajouter à l\'écran d\'accueil" / "Installer l\'application".');
   document.getElementById('shareNativeBtn').style.display = navigator.share ? 'inline-block' : 'none';
   document.getElementById('shareFileWarning').style.display = (window.location.protocol === 'file:') ? 'block' : 'none';
   openModal('modalShare');
@@ -1455,7 +1468,7 @@ function fallbackCopyShare(){
 }
 function nativeShare(){
   if(!navigator.share) return;
-  navigator.share({title:'Plateforme Scolaire', text:'Accédez à la Plateforme Scolaire :', url: appShareUrl()}).catch(()=>{});
+  navigator.share({title:'Hôtellerie', text:'Accédez à Hôtellerie :', url: appShareUrl()}).catch(()=>{});
 }
 </script>
 </body>

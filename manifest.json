@@ -1,6 +1,6 @@
 {
-  "name": "Plateforme Scolaire",
-  "short_name": "École",
+  "name": "Hôtellerie",
+  "short_name": "Hôtellerie",
   "description": "Gestion des élèves, enseignants, présences, notes et examens.",
   "start_url": "./index.html",
   "scope": "./",
