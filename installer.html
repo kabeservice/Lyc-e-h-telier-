@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hôtellerie — Installer l'application</title>
+
+<!-- PWA : mêmes manifest/icônes que l'application, pour que l'installation
+     puisse être déclenchée directement depuis cette page d'accueil. -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1B2430">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+
+<style>
+  :root{
+    --ink:#1B2430; --ink-soft:#3A4556; --paper:#F6F5F1; --panel:#FFFFFF;
+    --accent:#C6742C; --accent-soft:#F1E1CE; --success:#3F7A5E; --success-soft:#E4EFE9;
+    --line:#E7E4DC;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Arial,sans-serif;background:var(--paper);color:var(--ink);}
+  .wrap{max-width:480px;margin:0 auto;padding:40px 22px 60px;text-align:center;}
+  .icon{width:96px;height:96px;border-radius:22px;box-shadow:0 8px 24px rgba(27,36,48,.18);}
+  h1{font-size:26px;margin:18px 0 4px;}
+  .tagline{color:#5B6474;font-size:14.5px;margin-bottom:26px;line-height:1.5;}
+  .features{text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:28px;}
+  .features li{margin:8px 0;font-size:13.5px;color:var(--ink-soft);}
+  .install-btn{
+    position:relative;display:inline-flex;align-items:center;gap:10px;
+    background:var(--accent);color:#fff;border:none;border-radius:50px;
+    font-size:16px;font-weight:700;padding:16px 30px;cursor:pointer;
+    box-shadow:0 6px 18px rgba(198,116,44,.35);
+  }
+  .install-btn:active{transform:translateY(1px);}
+  .pulse-ring{
+    position:absolute;inset:-6px;border-radius:50px;border:3px solid var(--accent);
+    animation:pulse 1.8s ease-out infinite;
+  }
+  @keyframes pulse{
+    0%{opacity:.7;transform:scale(1);}
+    100%{opacity:0;transform:scale(1.18);}
+  }
+  .open-link{display:block;margin-top:16px;font-size:13px;color:var(--ink-soft);text-decoration:underline;}
+  .status{margin-top:18px;font-size:12.5px;color:#7A8496;min-height:18px;}
+  .instructions{display:none;text-align:left;background:var(--accent-soft);border-radius:8px;padding:14px 16px;margin-top:18px;font-size:13px;color:#7A5A17;line-height:1.6;}
+  .instructions.show{display:block;}
+  .instructions b{display:block;margin-bottom:4px;}
+  footer{margin-top:36px;font-size:11.5px;color:#9AA4B4;}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <img class="icon" src="icon-512.png" alt="Hôtellerie">
+  <h1>Hôtellerie</h1>
+  <p class="tagline">Gestion d'établissement — élèves, enseignants, présences, notes et examens, synchronisés sur tous vos appareils.</p>
+
+  <ul class="features">
+    <li>✓ Fonctionne hors-ligne, comme une application installée</li>
+    <li>✓ Données synchronisées automatiquement entre appareils</li>
+    <li>✓ Comptes séparés : Développeur, Proviseur, Enseignants, Surveillants</li>
+    <li>✓ Gratuite, aucune boutique d'application nécessaire</li>
+  </ul>
+
+  <button class="install-btn" id="installBtn" onclick="doInstall()">
+    <span class="pulse-ring"></span>
+    📲 <span id="installBtnLabel">Installer l'application</span>
+  </button>
+  <div class="status" id="installStatus"></div>
+  <div class="instructions" id="iosInstructions">
+    <b>Sur iPhone / iPad (dans Safari) :</b>
+    1. Appuyez sur le bouton Partager en bas de l'écran (carré avec une flèche).<br>
+    2. Choisissez « Sur l'écran d'accueil ».<br>
+    3. Confirmez — l'icône Hôtellerie apparaît comme une vraie application.
+  </div>
+  <div class="instructions" id="genericInstructions">
+    <b>Si le bouton ne déclenche rien :</b>
+    Ouvrez le menu ⋮ de votre navigateur et choisissez « Installer l'application » ou « Ajouter à l'écran d'accueil ».
+  </div>
+
+  <a class="open-link" href="index.html">Ou ouvrez directement l'application dans le navigateur →</a>
+
+  <footer>Hôtellerie — application installable, sans magasin d'applications.</footer>
+</div>
+
+<script>
+let deferredPrompt = null;
+const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+function isStandalone(){
+  try{ return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true; }
+  catch(e){ return false; }
+}
+
+if(isStandalone()){
+  document.getElementById('installBtnLabel').textContent = 'Déjà installée ✓';
+  document.getElementById('installStatus').textContent = "Vous utilisez déjà l'application installée.";
+}
+
+window.addEventListener('beforeinstallprompt', (e)=>{
+  e.preventDefault();
+  deferredPrompt = e;
+});
+window.addEventListener('appinstalled', ()=>{
+  deferredPrompt = null;
+  document.getElementById('installBtnLabel').textContent = 'Installée ✓';
+  document.getElementById('installStatus').textContent = "C'est fait ! Cherchez l'icône Hôtellerie sur votre écran d'accueil.";
+});
+
+async function doInstall(){
+  if(isStandalone()) return;
+  if(deferredPrompt){
+    deferredPrompt.prompt();
+    const choice = await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    if(choice.outcome !== 'accepted'){
+      document.getElementById('installStatus').textContent = "Installation annulée — vous pouvez réessayer à tout moment.";
+    }
+    return;
+  }
+  if(isIOS){
+    document.getElementById('iosInstructions').classList.add('show');
+    document.getElementById('installStatus').textContent = '';
+  } else {
+    document.getElementById('genericInstructions').classList.add('show');
+    document.getElementById('installStatus').textContent = "Astuce : visitez cette page une ou deux fois, le bouton d'installation devient actif automatiquement.";
+  }
+}
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
+</script>
+
+</body>
+</html>
