@@ -1161,7 +1161,7 @@ pageWrap('parametres', `
     <label>Config Firebase (collée depuis la console Firebase, au format JSON)</label>
     <textarea id="firebaseConfigInput" rows="5" placeholder='{"apiKey":"...","authDomain":"...","projectId":"..."}'></textarea>
     <button class="btn accent" style="margin-top:10px;" onclick="connectFirebase()">Connecter</button>
-    <div class="warn-note">Tant que Firestore n'est pas connecté, toutes les données sont conservées uniquement dans ce navigateur et sont perdues au rechargement de la page.</div>
+    <div class="warn-note">Tant que Firestore n'est pas connecté, toutes les données sont conservées uniquement dans ce navigateur et sont perdues au rechargement de la page. Note : les photos et documents joints aux fiches élèves restent toujours locaux à cet appareil (non synchronisés), pour rester sous la limite de taille de Firestore.</div>
   </div>
 
   <div class="panel" style="margin-top:18px;">
@@ -1212,6 +1212,7 @@ function renderAll(){
   const ae = document.getElementById('angElevesCount'); if(ae) ae.textContent = ELEVES.length;
   const aen = document.getElementById('angEnsCount'); if(aen) aen.textContent = ENSEIGNANTS.filter(e=>/anglais/i.test(e.matiere||'')).length;
   const rb = document.getElementById('rapportsBulletins'); if(rb) rb.textContent = `0/${ELEVES.length} finalisés`;
+  scheduleSave();
 }
 
 /* ============================================================
@@ -1264,6 +1265,7 @@ function createTeacher(){
   document.getElementById('newTeacherRole').value = 'enseignant';
   closeModal('modalAddTeacher');
   renderUsersPage();
+  scheduleSave();
   alert(`Compte créé.\nIdentifiant : ${login}\nMot de passe temporaire : ${tempPass}\n\nCommuniquez ces informations à la personne — elle devra le changer à la première connexion.`);
 }
 let resetTargetId = null;
@@ -1280,6 +1282,7 @@ function doResetPassword(){
   u.pass = newPass;
   document.getElementById('resetPwResult').innerHTML = `<div class="pw-reveal">Nouveau mot de passe : ${newPass}</div>`;
   renderUsersPage();
+  scheduleSave();
 }
 
 /* ============================================================
@@ -1411,7 +1414,11 @@ function tryInitFirebase(configStr){
 function connectFirebase(){
   const val = document.getElementById('firebaseConfigInput').value.trim();
   if(!val){ alert('Collez la config Firebase (JSON) d\'abord.'); return; }
-  if(tryInitFirebase(val)){ updateFirebaseStatus(); alert('Connecté à Firestore.\n\n(La synchronisation des données élèves/classes/etc. avec Firestore reste à activer — pour l\'instant seule la connexion est établie.)'); }
+  if(tryInitFirebase(val)){
+    updateFirebaseStatus();
+    loadStateFromFirestore().then(()=>{ renderAll(); });
+    alert('Connecté à Firestore. Les données vont maintenant se synchroniser automatiquement.');
+  }
 }
 function updateFirebaseStatus(){
   const el = document.getElementById('firebaseStatus');
@@ -1420,13 +1427,66 @@ function updateFirebaseStatus(){
     ? 'Connecté ✓' + (typeof firebase!=='undefined' && firebase.apps.length ? ' (projet : ' + (firebase.app().options.projectId||'—') + ')' : '')
     : 'Non connecté — mode local (données en mémoire uniquement)';
 }
+
+/* ---- Synchronisation des données avec Firestore ----
+   Tout est stocké dans un seul document (app/state) pour rester simple.
+   Les photos et documents joints des élèves restent LOCAUX uniquement
+   (non synchronisés) car ils peuvent dépasser la limite de taille d'un
+   document Firestore (1 Mo) — à faire évoluer vers Firebase Storage
+   si besoin de les partager entre appareils. */
+function stateForSync(){
+  return {
+    CLASSES,
+    ELEVES: ELEVES.map(e=>{ const {photo, documents, ...rest} = e; return rest; }),
+    DOSSIERS,
+    ENSEIGNANTS,
+    NOTES,
+    EXAMENS,
+    USERS,
+    updatedAt: new Date().toISOString()
+  };
+}
+async function loadStateFromFirestore(){
+  if(!firebaseReady || !db) return;
+  try{
+    const snap = await db.collection('app').doc('state').get();
+    if(snap.exists){
+      const data = snap.data();
+      if(data.CLASSES) CLASSES = data.CLASSES;
+      if(data.ELEVES) ELEVES = data.ELEVES.map(e=>({photo:null, documents:[], ...e}));
+      if(data.DOSSIERS) DOSSIERS = data.DOSSIERS;
+      if(data.ENSEIGNANTS) ENSEIGNANTS = data.ENSEIGNANTS;
+      if(data.NOTES) NOTES = data.NOTES;
+      if(data.EXAMENS) EXAMENS = data.EXAMENS;
+      if(data.USERS) USERS = data.USERS;
+    }
+  }catch(err){
+    console.error('Chargement Firestore impossible :', err);
+  }
+}
+let saveTimer = null;
+function scheduleSave(){
+  if(!firebaseReady || !db) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveStateToFirestore, 800);
+}
+async function saveStateToFirestore(){
+  if(!firebaseReady || !db) return;
+  try{
+    await db.collection('app').doc('state').set(stateForSync());
+  }catch(err){
+    console.error('Sauvegarde Firestore impossible :', err);
+  }
+}
 (function(){
   const saved = localStorage.getItem('firebaseConfig');
-  if(saved) tryInitFirebase(saved);
-  else tryInitFirebase(JSON.stringify(DEFAULT_FIREBASE_CONFIG));
+  const ok = saved ? tryInitFirebase(saved) : tryInitFirebase(JSON.stringify(DEFAULT_FIREBASE_CONFIG));
+  if(ok){
+    loadStateFromFirestore().finally(()=>{ updateFirebaseStatus(); showLoginScreen(); });
+  } else {
+    showLoginScreen();
+  }
 })();
-
-showLoginScreen();
 
 /* ============================================================
    INSTALLATION PWA
