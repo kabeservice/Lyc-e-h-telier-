@@ -188,7 +188,6 @@
   .role-badge{padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;}
   .role-badge.direction{background:#E7E2F3;color:#5B3FA0;}
   .role-badge.enseignant{background:var(--success-soft);color:var(--success);}
-  .role-badge.surveillant{background:var(--warn-soft);color:#7A5A17;}
   .role-badge.developpeur{background:var(--danger-soft);color:var(--danger);}
 
   .switch{position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0;}
@@ -284,12 +283,12 @@
 
   <div class="login-card" id="loginCardSetup" style="display:none;">
     <div class="login-brand">Bienvenue</div>
-    <div class="login-sub">Aucun compte n'existe encore. Créez le compte Développeur pour démarrer — il pourra ensuite créer les comptes du Proviseur, des enseignants, des surveillants, etc.</div>
+    <div class="login-sub">Aucun compte n'existe encore. Créez le compte Direction pour démarrer.</div>
 
     <label>Nom complet</label>
-    <input type="text" id="setupNom" placeholder="ex : M. Idriss Warsama">
+    <input type="text" id="setupNom" placeholder="ex : Mme Amina Robleh">
     <label>Identifiant</label>
-    <input type="text" id="setupLogin" placeholder="ex : idriss.dev">
+    <input type="text" id="setupLogin" placeholder="ex : amina.direction">
     <label>Mot de passe</label>
     <input type="text" id="setupPass" placeholder="Choisissez un mot de passe">
     <div class="login-error" id="setupError">Merci de remplir tous les champs.</div>
@@ -304,7 +303,7 @@
   <!-- ============ SIDEBAR ============ -->
   <aside class="sidebar" id="sidebar">
     <div class="brand">
-      <div class="brand-name">Hôtellerie</div>
+      <div class="brand-name">Hôtellerie — Direction</div>
       <div class="brand-sub">Année scolaire 2026 – 2027</div>
     </div>
     <nav class="nav" id="nav"></nav>
@@ -340,7 +339,7 @@
     <label>Nom complet</label>
     <input type="text" id="newTeacherName" placeholder="ex : Mme Souad Hassan">
     <label>Rôle</label>
-    <select id="newTeacherRole"><option value="enseignant">Enseignant</option><option value="surveillant">Surveillant</option><option value="direction">Proviseur</option><option value="developpeur">Développeur</option></select>
+    <select id="newTeacherRole"><option value="enseignant">Enseignant</option><option value="direction">Direction</option><option value="developpeur">Développeur</option></select>
     <label>Matière / poste</label>
     <input type="text" id="newTeacherSubject" placeholder="ex : Mathématiques">
     <label>Identifiant</label>
@@ -531,7 +530,7 @@ function nextMatricule(){ return String(2600 + ELEVES.length + 1); }
 // En production, ils doivent être hachés côté serveur / Firebase Auth —
 // même le compte développeur ne devrait forcer qu'une réinitialisation.
 let USERS = [];
-const ROLE_LABELS = {direction:'Proviseur', enseignant:'Enseignant', surveillant:'Surveillant', developpeur:'Développeur'};
+const ROLE_LABELS = {direction:'Direction', enseignant:'Enseignant', developpeur:'Développeur'};
 let currentUser = null;
 
 function showLoginScreen(){
@@ -560,7 +559,7 @@ function createFirstAccount(){
   const login = document.getElementById('setupLogin').value.trim();
   const pass = document.getElementById('setupPass').value;
   if(!nom || !login || !pass){ document.getElementById('setupError').style.display = 'block'; return; }
-  const user = {id: uid('u'), login, nom, role:'developpeur', pass, poste:'Développeur plateforme'};
+  const user = {id: uid('u'), login, nom, role:'direction', pass, poste:'Directrice / Directeur'};
   USERS.push(user);
   completeLogin(user);
 }
@@ -584,17 +583,17 @@ function logout(){
    NAVIGATION
    ============================================================ */
 const PAGES = [
-  {id:'dashboard', label:'Tableau de bord', ico:'▣', roles:['direction','enseignant','surveillant','developpeur']},
-  {id:'eleves', label:'Élèves', ico:'◈', roles:['direction','enseignant','surveillant','developpeur']},
+  {id:'dashboard', label:'Tableau de bord', ico:'▣', roles:['direction','enseignant','developpeur']},
+  {id:'eleves', label:'Élèves', ico:'◈', roles:['direction','enseignant','developpeur']},
   {id:'classes', label:'Classes', ico:'▤', roles:['direction','developpeur']},
   {id:'enseignants', label:'Enseignants', ico:'◇', roles:['direction','developpeur']},
-  {id:'presence', label:'Appel de présence', ico:'✓', roles:['direction','enseignant','surveillant','developpeur']},
+  {id:'presence', label:'Appel de présence', ico:'✓', roles:['direction','enseignant','developpeur']},
   {id:'notes', label:'Notes', ico:'✎', roles:['direction','enseignant','developpeur']},
   {id:'examens', label:'Examens', ico:'▦', roles:['direction','enseignant','developpeur']},
   {id:'cours', label:'Cours & Programme', ico:'▥', roles:['direction','enseignant','developpeur']},
   {id:'anglais', label:'Module Anglais', ico:'A', roles:['direction','enseignant','developpeur']},
   {id:'rapports', label:'Rapports', ico:'▧', roles:['direction','developpeur']},
-  {id:'calendrier', label:'Calendrier', ico:'▨', roles:['direction','enseignant','surveillant','developpeur']},
+  {id:'calendrier', label:'Calendrier', ico:'▨', roles:['direction','enseignant','developpeur']},
   {id:'utilisateurs', label:'Utilisateurs', ico:'◐', roles:['direction','developpeur']},
   {id:'parametres', label:'Paramètres', ico:'⚙', roles:['direction','developpeur']},
   {id:'comptes-dev', label:'Comptes système', ico:'⛭', roles:['developpeur']},
@@ -1177,7 +1176,7 @@ pageWrap('parametres', `
     <h3>Permissions par rôle</h3>
 
     <table class="perm-table">
-      <thead><tr><th>Module</th><th>Proviseur</th><th>Enseignant</th></tr></thead>
+      <thead><tr><th>Module</th><th>Direction</th><th>Enseignant</th></tr></thead>
       <tbody>
         ${['Élèves','Notes','Présence','Examens','Rapports','Gestion des enseignants','Paramètres établissement'].map((mod,i)=>`
         <tr>
@@ -1187,7 +1186,7 @@ pageWrap('parametres', `
         </tr>`).join('')}
       </tbody>
     </table>
-    <p class="subtle" style="margin-top:10px;">La colonne Proviseur reste toujours activée. Décochez une case pour retirer l'accès des enseignants à ce module.</p>
+    <p class="subtle" style="margin-top:10px;">La colonne Direction reste toujours activée. Décochez une case pour retirer l'accès des enseignants à ce module.</p>
   </div>
 
   <div class="panel" style="margin-top:18px;">
@@ -1269,7 +1268,7 @@ function createTeacher(){
   const manualLogin = document.getElementById('newTeacherLogin').value.trim();
   const login = manualLogin || name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z ]/g,'').trim().split(' ').reverse().join('.') || ('utilisateur' + (USERS.length+1));
   const tempPass = genPassword();
-  const defaultPoste = role==='direction' ? 'Proviseur' : role==='developpeur' ? 'Développeur plateforme' : role==='surveillant' ? 'Surveillant' : 'Enseignant';
+  const defaultPoste = role==='direction' ? 'Direction' : role==='developpeur' ? 'Développeur plateforme' : 'Enseignant';
   USERS.push({id: uid('u'), login, nom:name, role, pass:tempPass, poste: document.getElementById('newTeacherSubject').value.trim() || defaultPoste});
   ['newTeacherName','newTeacherSubject','newTeacherLogin'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('newTeacherRole').value = 'enseignant';
@@ -1523,11 +1522,7 @@ if('serviceWorker' in navigator){
 // disponible (topbar + écran de connexion).
 let deferredInstallPrompt = null;
 function isStandalone(){
-  try{
-    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
-  }catch(e){
-    return false;
-  }
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 }
 function showInstallButtons(show){
   const b1 = document.getElementById('installAppBtn');
@@ -1567,7 +1562,7 @@ if(isStandalone()) showInstallButtons(false);
    PARTAGE DE L'APPLICATION (lien, WhatsApp, e-mail, copier)
    ============================================================ */
 function appShareUrl(){
-  return window.location.origin + window.location.pathname.replace(/index\.html$/, '').replace(/\/?$/, '/') + 'installer.html';
+  return window.location.origin + window.location.pathname;
 }
 function openShareModal(){
   const url = appShareUrl();
