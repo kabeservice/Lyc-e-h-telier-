@@ -268,6 +268,7 @@
 
 <!-- ============ ECRAN DE CONNEXION ============ -->
 <div class="login-screen" id="loginScreen">
+  <button id="installAppBtnLogin" onclick="installApp()" style="display:none;position:fixed;top:14px;right:14px;z-index:50;" class="btn sm accent">📲 Installer l'application</button>
   <div class="login-card" id="loginCardNormal">
     <div class="login-brand">Hôtellerie</div>
     <div class="login-sub">Connectez-vous avec votre identifiant</div>
@@ -320,6 +321,7 @@
       </div>
       <div class="topbar-right">
         <span id="topbarUserRole"></span>
+        <button class="btn sm" id="installAppBtn" onclick="installApp()" style="display:none;">📲 Installer</button>
         <button class="btn sm accent" onclick="openShareModal()">Partager</button>
         <div class="avatar" id="topbarAvatar"></div>
         <button class="btn sm" onclick="logout()">Déconnexion</button>
@@ -1156,16 +1158,23 @@ pageWrap('parametres', `
   </div>
 
   <div class="panel" style="margin-top:18px;">
-    <h3>Connexion Firestore (base de données en ligne)</h3>
+    <h3>Synchronisation des données</h3>
     <p class="subtle" id="firebaseStatus">Non connecté — mode local (données en mémoire uniquement)</p>
-    <label>Config Firebase (collée depuis la console Firebase, au format JSON)</label>
-    <textarea id="firebaseConfigInput" rows="5" placeholder='{"apiKey":"...","authDomain":"...","projectId":"..."}'></textarea>
-    <button class="btn accent" style="margin-top:10px;" onclick="connectFirebase()">Connecter</button>
-    <div class="warn-note">Tant que Firestore n'est pas connecté, toutes les données sont conservées uniquement dans ce navigateur et sont perdues au rechargement de la page. Note : les photos et documents joints aux fiches élèves restent toujours locaux à cet appareil (non synchronisés), pour rester sous la limite de taille de Firestore.</div>
+    <div id="firebaseSyncOk" style="display:none;">
+      <p class="subtle">Vos données (classes, élèves, notes, présences, examens, comptes) se sauvegardent automatiquement et se retrouvent sur tous vos appareils. Les photos et documents joints restent uniquement sur cet appareil.</p>
+      <button class="btn sm" style="margin-top:6px;" onclick="toggleAdvancedFirebase()">Options avancées</button>
+    </div>
+    <div id="firebaseAdvanced" style="display:none;margin-top:12px;">
+      <label>Config Firebase (collée depuis la console Firebase, au format JSON)</label>
+      <textarea id="firebaseConfigInput" rows="5" placeholder='{"apiKey":"...","authDomain":"...","projectId":"..."}'></textarea>
+      <button class="btn accent" style="margin-top:10px;" onclick="connectFirebase()">Connecter</button>
+      <div class="warn-note" id="firebaseNotConnectedWarning" style="display:none;">Tant que Firestore n'est pas connecté, toutes les données sont conservées uniquement dans ce navigateur et sont perdues au rechargement de la page.</div>
+    </div>
   </div>
 
   <div class="panel" style="margin-top:18px;">
     <h3>Permissions par rôle</h3>
+
     <table class="perm-table">
       <thead><tr><th>Module</th><th>Direction</th><th>Enseignant</th></tr></thead>
       <tbody>
@@ -1426,6 +1435,16 @@ function updateFirebaseStatus(){
   el.textContent = firebaseReady
     ? 'Connecté ✓' + (typeof firebase!=='undefined' && firebase.apps.length ? ' (projet : ' + (firebase.app().options.projectId||'—') + ')' : '')
     : 'Non connecté — mode local (données en mémoire uniquement)';
+  const ok = document.getElementById('firebaseSyncOk');
+  const adv = document.getElementById('firebaseAdvanced');
+  const warn = document.getElementById('firebaseNotConnectedWarning');
+  if(ok) ok.style.display = firebaseReady ? 'block' : 'none';
+  if(adv) adv.style.display = firebaseReady ? 'none' : 'block';
+  if(warn) warn.style.display = firebaseReady ? 'none' : 'block';
+}
+function toggleAdvancedFirebase(){
+  const adv = document.getElementById('firebaseAdvanced');
+  if(adv) adv.style.display = adv.style.display === 'none' ? 'block' : 'none';
 }
 
 /* ---- Synchronisation des données avec Firestore ----
@@ -1496,6 +1515,48 @@ if('serviceWorker' in navigator){
     navigator.serviceWorker.register('sw.js').catch(()=>{});
   });
 }
+
+// Bouton d'installation explicite : Chrome/Edge/Android ne montrent plus
+// systématiquement leur propre bannière, donc on capture l'évènement du
+// navigateur et on affiche nos propres boutons "Installer" dès qu'il est
+// disponible (topbar + écran de connexion).
+let deferredInstallPrompt = null;
+function isStandalone(){
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+function showInstallButtons(show){
+  const b1 = document.getElementById('installAppBtn');
+  const b2 = document.getElementById('installAppBtnLogin');
+  if(b1) b1.style.display = show ? 'inline-block' : 'none';
+  if(b2) b2.style.display = show ? 'inline-block' : 'none';
+}
+window.addEventListener('beforeinstallprompt', (e)=>{
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  if(!isStandalone()) showInstallButtons(true);
+});
+window.addEventListener('appinstalled', ()=>{
+  deferredInstallPrompt = null;
+  showInstallButtons(false);
+});
+async function installApp(){
+  if(deferredInstallPrompt){
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    showInstallButtons(false);
+    return;
+  }
+  // Pas d'évènement natif disponible (iOS Safari, ou déjà installé, ou
+  // conditions du navigateur pas encore réunies) : on guide la personne.
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if(isIOS){
+    alert('Pour installer l\'application sur iPhone/iPad :\n\n1. Ouvrez ce lien dans Safari (pas Chrome).\n2. Appuyez sur le bouton Partager (le carré avec une flèche vers le haut).\n3. Choisissez "Sur l\'écran d\'accueil".');
+  } else {
+    alert('Le bouton d\'installation apparaît automatiquement une fois que le navigateur le permet (parfois après quelques visites). En attendant, ouvrez le menu ⋮ du navigateur et choisissez "Installer l\'application" ou "Ajouter à l\'écran d\'accueil".');
+  }
+}
+if(isStandalone()) showInstallButtons(false);
 
 /* ============================================================
    PARTAGE DE L'APPLICATION (lien, WhatsApp, e-mail, copier)
