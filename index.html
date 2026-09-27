@@ -188,6 +188,7 @@
   .role-badge{padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;}
   .role-badge.direction{background:#E7E2F3;color:#5B3FA0;}
   .role-badge.enseignant{background:var(--success-soft);color:var(--success);}
+  .role-badge.surveillant{background:var(--warn-soft);color:#7A5A17;}
   .role-badge.developpeur{background:var(--danger-soft);color:var(--danger);}
 
   .switch{position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0;}
@@ -236,6 +237,14 @@
   .file-btn{cursor:pointer;}
   .file-btn input{display:none;}
 
+  /* ---------- SYNC STATUS INDICATOR ---------- */
+  @keyframes spin{0%{transform:rotate(0deg);} 100%{transform:rotate(360deg);}}
+  #syncStatus{transition:color .3s;}
+  #syncIcon{display:inline-block;}
+  #syncStatus.syncing #syncIcon{animation:spin .8s linear infinite;}
+  #syncStatus.synced{color:#3F7A5E;}
+  #syncStatus.offline{color:#7A8496;}
+
   /* ---------- RESPONSIVE ---------- */
   @media (max-width:900px){
     .menu-toggle{display:flex;}
@@ -283,12 +292,12 @@
 
   <div class="login-card" id="loginCardSetup" style="display:none;">
     <div class="login-brand">Bienvenue</div>
-    <div class="login-sub">Aucun compte n'existe encore. Créez le compte Direction pour démarrer.</div>
+    <div class="login-sub">Aucun compte n'existe encore. Créez le compte Développeur pour démarrer — il pourra ensuite créer les comptes du Proviseur, des enseignants, des surveillants, etc.</div>
 
     <label>Nom complet</label>
-    <input type="text" id="setupNom" placeholder="ex : Mme Amina Robleh">
+    <input type="text" id="setupNom" placeholder="ex : M. Idriss Warsama">
     <label>Identifiant</label>
-    <input type="text" id="setupLogin" placeholder="ex : amina.direction">
+    <input type="text" id="setupLogin" placeholder="ex : idriss.dev">
     <label>Mot de passe</label>
     <input type="text" id="setupPass" placeholder="Choisissez un mot de passe">
     <div class="login-error" id="setupError">Merci de remplir tous les champs.</div>
@@ -303,7 +312,7 @@
   <!-- ============ SIDEBAR ============ -->
   <aside class="sidebar" id="sidebar">
     <div class="brand">
-      <div class="brand-name">Hôtellerie — Direction</div>
+      <div class="brand-name">Hôtellerie</div>
       <div class="brand-sub">Année scolaire 2026 – 2027</div>
     </div>
     <nav class="nav" id="nav"></nav>
@@ -320,6 +329,9 @@
         </div>
       </div>
       <div class="topbar-right">
+        <span id="syncStatus" style="font-size:12px;color:#7A8496;display:flex;align-items:center;gap:5px;">
+          <span id="syncIcon">⊙</span><span id="syncText">Hors ligne</span>
+        </span>
         <span id="topbarUserRole"></span>
         <button class="btn sm" id="installAppBtn" onclick="installApp()" style="display:none;">📲 Installer</button>
         <button class="btn sm accent" onclick="openShareModal()">Partager</button>
@@ -339,7 +351,7 @@
     <label>Nom complet</label>
     <input type="text" id="newTeacherName" placeholder="ex : Mme Souad Hassan">
     <label>Rôle</label>
-    <select id="newTeacherRole"><option value="enseignant">Enseignant</option><option value="direction">Direction</option><option value="developpeur">Développeur</option></select>
+    <select id="newTeacherRole"><option value="enseignant">Enseignant</option><option value="surveillant">Surveillant</option><option value="direction">Proviseur</option><option value="developpeur">Développeur</option></select>
     <label>Matière / poste</label>
     <input type="text" id="newTeacherSubject" placeholder="ex : Mathématiques">
     <label>Identifiant</label>
@@ -360,6 +372,24 @@
     <div id="resetPwResult"></div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal('modalResetPw')">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalFirstLoginChangePw">
+  <div class="modal-card">
+    <h3>Changez votre mot de passe</h3>
+    <p class="subtle">Première connexion — veuillez définir un nouveau mot de passe personnel.</p>
+    <label>Ancien mot de passe</label>
+    <input type="password" id="firstLoginOldPw" disabled value="5599" style="background:#f0f0f0;">
+    <label>Nouveau mot de passe</label>
+    <input type="password" id="firstLoginNewPw" placeholder="Entrez un mot de passe" onkeypress="if(event.key==='Enter') doFirstLoginChangePw();">
+    <label>Confirmer</label>
+    <input type="password" id="firstLoginConfirmPw" placeholder="Confirmez le mot de passe" onkeypress="if(event.key==='Enter') doFirstLoginChangePw();">
+    <div id="firstLoginError" style="color:var(--danger);font-size:12px;margin-top:10px;display:none;"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('modalFirstLoginChangePw')">Annuler</button>
+      <button class="btn accent" onclick="doFirstLoginChangePw()">Confirmer et continuer</button>
     </div>
   </div>
 </div>
@@ -529,19 +559,36 @@ function nextMatricule(){ return String(2600 + ELEVES.length + 1); }
 // NB (prototype) : les mots de passe apparaissent en clair pour la démo.
 // En production, ils doivent être hachés côté serveur / Firebase Auth —
 // même le compte développeur ne devrait forcer qu'une réinitialisation.
-let USERS = [];
-const ROLE_LABELS = {direction:'Direction', enseignant:'Enseignant', developpeur:'Développeur'};
+let USERS = [
+  {id: 'dev-default', login: 'Wais', nom: 'Wais', role:'developpeur', pass:'5599', poste:'Développeur plateforme'}
+];
+let firstLoginWithDefaultPass = false;
+const ROLE_LABELS = {direction:'Proviseur', enseignant:'Enseignant', surveillant:'Surveillant', developpeur:'Développeur'};
 let currentUser = null;
+
+function loadUsersFromLocal(){
+  try{
+    const saved = localStorage.getItem('hotellerie-users');
+    if(saved){
+      const loaded = JSON.parse(saved);
+      // Keep Wais account, add any other saved accounts
+      USERS = [
+        {id: 'dev-default', login: 'Wais', nom: 'Wais', role:'developpeur', pass:'5599', poste:'Développeur plateforme'},
+        ...loaded.filter(u => u.id !== 'dev-default')
+      ];
+    }
+  }catch(e){}
+}
+function saveUsersToLocal(){
+  localStorage.setItem('hotellerie-users', JSON.stringify(USERS.filter(u => u.id !== 'dev-default')));
+}
+
+loadUsersFromLocal();
 
 function showLoginScreen(){
   document.getElementById('loginScreen').style.display = 'flex';
-  if(USERS.length === 0){
-    document.getElementById('loginCardNormal').style.display = 'none';
-    document.getElementById('loginCardSetup').style.display = 'block';
-  } else {
-    document.getElementById('loginCardNormal').style.display = 'block';
-    document.getElementById('loginCardSetup').style.display = 'none';
-  }
+  document.getElementById('loginCardNormal').style.display = 'block';
+  document.getElementById('loginCardSetup').style.display = 'none';
 }
 
 function completeLogin(user){
@@ -559,8 +606,9 @@ function createFirstAccount(){
   const login = document.getElementById('setupLogin').value.trim();
   const pass = document.getElementById('setupPass').value;
   if(!nom || !login || !pass){ document.getElementById('setupError').style.display = 'block'; return; }
-  const user = {id: uid('u'), login, nom, role:'direction', pass, poste:'Directrice / Directeur'};
+  const user = {id: uid('u'), login, nom, role:'developpeur', pass, poste:'Développeur plateforme'};
   USERS.push(user);
+  saveUsersToLocal();
   completeLogin(user);
 }
 
@@ -583,17 +631,17 @@ function logout(){
    NAVIGATION
    ============================================================ */
 const PAGES = [
-  {id:'dashboard', label:'Tableau de bord', ico:'▣', roles:['direction','enseignant','developpeur']},
-  {id:'eleves', label:'Élèves', ico:'◈', roles:['direction','enseignant','developpeur']},
+  {id:'dashboard', label:'Tableau de bord', ico:'▣', roles:['direction','enseignant','surveillant','developpeur']},
+  {id:'eleves', label:'Élèves', ico:'◈', roles:['direction','enseignant','surveillant','developpeur']},
   {id:'classes', label:'Classes', ico:'▤', roles:['direction','developpeur']},
   {id:'enseignants', label:'Enseignants', ico:'◇', roles:['direction','developpeur']},
-  {id:'presence', label:'Appel de présence', ico:'✓', roles:['direction','enseignant','developpeur']},
+  {id:'presence', label:'Appel de présence', ico:'✓', roles:['direction','enseignant','surveillant','developpeur']},
   {id:'notes', label:'Notes', ico:'✎', roles:['direction','enseignant','developpeur']},
   {id:'examens', label:'Examens', ico:'▦', roles:['direction','enseignant','developpeur']},
   {id:'cours', label:'Cours & Programme', ico:'▥', roles:['direction','enseignant','developpeur']},
   {id:'anglais', label:'Module Anglais', ico:'A', roles:['direction','enseignant','developpeur']},
   {id:'rapports', label:'Rapports', ico:'▧', roles:['direction','developpeur']},
-  {id:'calendrier', label:'Calendrier', ico:'▨', roles:['direction','enseignant','developpeur']},
+  {id:'calendrier', label:'Calendrier', ico:'▨', roles:['direction','enseignant','surveillant','developpeur']},
   {id:'utilisateurs', label:'Utilisateurs', ico:'◐', roles:['direction','developpeur']},
   {id:'parametres', label:'Paramètres', ico:'⚙', roles:['direction','developpeur']},
   {id:'comptes-dev', label:'Comptes système', ico:'⛭', roles:['developpeur']},
@@ -1176,7 +1224,7 @@ pageWrap('parametres', `
     <h3>Permissions par rôle</h3>
 
     <table class="perm-table">
-      <thead><tr><th>Module</th><th>Direction</th><th>Enseignant</th></tr></thead>
+      <thead><tr><th>Module</th><th>Proviseur</th><th>Enseignant</th></tr></thead>
       <tbody>
         ${['Élèves','Notes','Présence','Examens','Rapports','Gestion des enseignants','Paramètres établissement'].map((mod,i)=>`
         <tr>
@@ -1186,7 +1234,7 @@ pageWrap('parametres', `
         </tr>`).join('')}
       </tbody>
     </table>
-    <p class="subtle" style="margin-top:10px;">La colonne Direction reste toujours activée. Décochez une case pour retirer l'accès des enseignants à ce module.</p>
+    <p class="subtle" style="margin-top:10px;">La colonne Proviseur reste toujours activée. Décochez une case pour retirer l'accès des enseignants à ce module.</p>
   </div>
 
   <div class="panel" style="margin-top:18px;">
@@ -1268,8 +1316,9 @@ function createTeacher(){
   const manualLogin = document.getElementById('newTeacherLogin').value.trim();
   const login = manualLogin || name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z ]/g,'').trim().split(' ').reverse().join('.') || ('utilisateur' + (USERS.length+1));
   const tempPass = genPassword();
-  const defaultPoste = role==='direction' ? 'Direction' : role==='developpeur' ? 'Développeur plateforme' : 'Enseignant';
+  const defaultPoste = role==='direction' ? 'Proviseur' : role==='developpeur' ? 'Développeur plateforme' : role==='surveillant' ? 'Surveillant' : 'Enseignant';
   USERS.push({id: uid('u'), login, nom:name, role, pass:tempPass, poste: document.getElementById('newTeacherSubject').value.trim() || defaultPoste});
+  saveUsersToLocal();
   ['newTeacherName','newTeacherSubject','newTeacherLogin'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('newTeacherRole').value = 'enseignant';
   closeModal('modalAddTeacher');
@@ -1289,9 +1338,37 @@ function doResetPassword(){
   const u = USERS.find(x=>x.id===resetTargetId);
   const newPass = genPassword();
   u.pass = newPass;
+  saveUsersToLocal();
   document.getElementById('resetPwResult').innerHTML = `<div class="pw-reveal">Nouveau mot de passe : ${newPass}</div>`;
   renderUsersPage();
   scheduleSave();
+}
+
+function doFirstLoginChangePw(){
+  const newPw = document.getElementById('firstLoginNewPw').value.trim();
+  const confirm = document.getElementById('firstLoginConfirmPw').value.trim();
+  const err = document.getElementById('firstLoginError');
+  
+  if(!newPw || !confirm){
+    err.textContent = 'Veuillez remplir tous les champs.';
+    err.style.display = 'block';
+    return;
+  }
+  if(newPw !== confirm){
+    err.textContent = 'Les mots de passe ne correspondent pas.';
+    err.style.display = 'block';
+    return;
+  }
+  if(newPw.length < 4){
+    err.textContent = 'Le mot de passe doit faire au moins 4 caractères.';
+    err.style.display = 'block';
+    return;
+  }
+  
+  currentUser.pass = newPw;
+  saveUsersToLocal();
+  closeModal('modalFirstLoginChangePw');
+  completeLogin(currentUser);
 }
 
 /* ============================================================
@@ -1441,6 +1518,7 @@ function updateFirebaseStatus(){
   if(ok) ok.style.display = firebaseReady ? 'block' : 'none';
   if(adv) adv.style.display = firebaseReady ? 'none' : 'block';
   if(warn) warn.style.display = firebaseReady ? 'none' : 'block';
+  updateSyncStatus();
 }
 function toggleAdvancedFirebase(){
   const adv = document.getElementById('firebaseAdvanced');
@@ -1477,31 +1555,75 @@ async function loadStateFromFirestore(){
       if(data.ENSEIGNANTS) ENSEIGNANTS = data.ENSEIGNANTS;
       if(data.NOTES) NOTES = data.NOTES;
       if(data.EXAMENS) EXAMENS = data.EXAMENS;
-      if(data.USERS) USERS = data.USERS;
+      if(data.USERS){
+        const existingIds = new Set(USERS.map(u=>u.id));
+        const newUsers = data.USERS.filter(u=>!existingIds.has(u.id));
+        USERS.push(...newUsers);
+      }
     }
   }catch(err){
     console.error('Chargement Firestore impossible :', err);
   }
 }
 let saveTimer = null;
+let lastSyncTime = null;
+
+function updateSyncStatus(){
+  const el = document.getElementById('syncStatus');
+  const icon = document.getElementById('syncIcon');
+  const text = document.getElementById('syncText');
+  if(!el) return;
+  
+  if(!firebaseReady || !db){
+    el.className = 'offline';
+    icon.textContent = '⊙';
+    text.textContent = 'Hors ligne';
+  } else {
+    el.className = 'synced';
+    icon.textContent = '✓';
+    if(lastSyncTime){
+      const now = new Date();
+      const diff = Math.round((now - lastSyncTime) / 1000);
+      text.textContent = diff < 60 ? 'À l\'instant' : diff < 3600 ? `Il y a ${diff}s` : 'Synchronisé';
+    } else {
+      text.textContent = 'Connecté';
+    }
+  }
+}
+
+function showSyncing(){
+  const el = document.getElementById('syncStatus');
+  const icon = document.getElementById('syncIcon');
+  const text = document.getElementById('syncText');
+  if(!el) return;
+  el.className = 'syncing';
+  icon.textContent = '⟳';
+  text.textContent = 'Synchronisation...';
+}
+
 function scheduleSave(){
   if(!firebaseReady || !db) return;
   clearTimeout(saveTimer);
+  showSyncing();
   saveTimer = setTimeout(saveStateToFirestore, 800);
 }
+
 async function saveStateToFirestore(){
   if(!firebaseReady || !db) return;
   try{
     await db.collection('app').doc('state').set(stateForSync());
+    lastSyncTime = new Date();
+    updateSyncStatus();
   }catch(err){
     console.error('Sauvegarde Firestore impossible :', err);
+    updateSyncStatus();
   }
 }
 (function(){
   const saved = localStorage.getItem('firebaseConfig');
   const ok = saved ? tryInitFirebase(saved) : tryInitFirebase(JSON.stringify(DEFAULT_FIREBASE_CONFIG));
   if(ok){
-    loadStateFromFirestore().finally(()=>{ updateFirebaseStatus(); showLoginScreen(); });
+    loadStateFromFirestore().finally(()=>{ updateFirebaseStatus(); updateSyncStatus(); showLoginScreen(); });
   } else {
     showLoginScreen();
   }
@@ -1522,7 +1644,11 @@ if('serviceWorker' in navigator){
 // disponible (topbar + écran de connexion).
 let deferredInstallPrompt = null;
 function isStandalone(){
-  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  try{
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  }catch(e){
+    return false;
+  }
 }
 function showInstallButtons(show){
   const b1 = document.getElementById('installAppBtn');
@@ -1562,7 +1688,7 @@ if(isStandalone()) showInstallButtons(false);
    PARTAGE DE L'APPLICATION (lien, WhatsApp, e-mail, copier)
    ============================================================ */
 function appShareUrl(){
-  return window.location.origin + window.location.pathname;
+  return window.location.origin + window.location.pathname.replace(/index\.html$/, '').replace(/\/?$/, '/') + 'installer.html';
 }
 function openShareModal(){
   const url = appShareUrl();
@@ -1591,6 +1717,9 @@ function nativeShare(){
   if(!navigator.share) return;
   navigator.share({title:'Hôtellerie', text:'Accédez à Hôtellerie :', url: appShareUrl()}).catch(()=>{});
 }
+
+// Mise à jour en direct de l'indicateur de synchronisation toutes les secondes
+setInterval(updateSyncStatus, 1000);
 </script>
 </body>
 </html>
