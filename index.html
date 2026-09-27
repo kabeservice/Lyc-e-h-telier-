@@ -234,7 +234,8 @@
     display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);gap:10px;
   }
   .absent-list-item:last-child{border-bottom:none;}
-  .file-btn{cursor:pointer;}
+  .file-btn{cursor:pointer;display:inline-block;background:var(--accent);color:#fff;padding:10px 16px;border-radius:6px;font-weight:600;border:none;font-size:13px;}
+  .file-btn:hover{opacity:.9;}
   .file-btn input{display:none;}
 
   /* ---------- SYNC STATUS INDICATOR ---------- */
@@ -806,7 +807,7 @@ pageWrap('eleves', `
     </div>
     <div>
       <button class="btn accent" onclick="openAddEleveModal()">+ Nouvel élève</button>
-      <label class="btn file-btn">Importer (Excel/CSV)<input type="file" accept=".xlsx,.xls,.csv" onchange="handleEleveImport(this.files)"></label>
+      <label class="btn file-btn">Importer (Excel/CSV/All)<input type="file" accept=".xlsx,.xls,.csv,.ods,.txt" onchange="handleEleveImport(this.files)"></label>
     </div>
   </div>
   <div class="panel">
@@ -875,19 +876,90 @@ function createEleve(){
 
 /* ---------- IMPORT EXCEL / CSV (élèves) ---------- */
 function readSpreadsheet(file, callback){
+  if(!file){
+    alert('Veuillez sélectionner un fichier.');
+    return;
+  }
+  const fileName = file.name.toLowerCase();
+  const isCSV = fileName.endsWith('.csv') || fileName.endsWith('.txt');
   const reader = new FileReader();
+  
   reader.onload = function(e){
     try{
-      const data = new Uint8Array(e.target.result);
-      const wb = XLSX.read(data, {type:'array'});
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, {defval:''});
-      callback(rows);
+      if(isCSV){
+        // CSV/TXT parser léger
+        const text = e.target.result;
+        const lines = text.split('\n').filter(line => line.trim());
+        if(lines.length < 2){
+          alert('Le fichier est vide.');
+          return;
+        }
+        const headers = lines[0].split(',').map(h => h.trim());
+        const rows = [];
+        for(let i = 1; i < lines.length; i++){
+          const values = lines[i].split(',').map(v => v.trim());
+          const row = {};
+          headers.forEach((h, idx) => {
+            row[h] = values[idx] || '';
+          });
+          rows.push(row);
+        }
+        callback(rows);
+      } else {
+        // Excel (XLSX, XLS)
+        if(typeof XLSX === 'undefined'){
+          alert('Chargement de la bibliothèque Excel en cours... Réessayez dans quelques secondes.');
+          return;
+        }
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, {type:'array'});
+        
+        // Chercher la feuille avec des données (ignore Metadata si présent)
+        let sheet = null;
+        let sheetName = '';
+        for(const name of wb.SheetNames){
+          const ws = wb.Sheets[name];
+          if(ws && ws['!ref']){
+            const dim = ws['!ref'].split(':')[1];
+            if(dim && dim !== 'A1' && name.toLowerCase() !== 'metadata'){
+              sheet = ws;
+              sheetName = name;
+              break;
+            }
+          }
+        }
+        
+        // Si aucune feuille trouvée (sauf Metadata), utiliser la première
+        if(!sheet){
+          sheet = wb.Sheets[wb.SheetNames[0]];
+          sheetName = wb.SheetNames[0];
+        }
+        
+        if(!sheet){
+          alert('Le fichier Excel ne contient pas de données.');
+          return;
+        }
+        
+        const rows = XLSX.utils.sheet_to_json(sheet, {defval:''});
+        if(!rows.length){
+          alert('La feuille "' + sheetName + '" est vide.');
+          return;
+        }
+        callback(rows);
+      }
     }catch(err){
-      alert('Impossible de lire ce fichier : ' + err.message);
+      alert('Erreur de lecture : ' + err.message + '\n\nConseil : essayez avec CSV si le problème persiste.');
     }
   };
-  reader.readAsArrayBuffer(file);
+  reader.onerror = function(){
+    alert('Erreur lors de la lecture du fichier.');
+  };
+  
+  if(isCSV){
+    reader.readAsText(file, 'utf-8');
+  } else {
+    reader.readAsArrayBuffer(file);
+  }
 }
 function normKey(k){ return k.toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim(); }
 function getField(row, ...names){
@@ -1031,7 +1103,7 @@ pageWrap('notes', `
     <div class="toolbar-left"><span class="subtle" id="notesCount"></span></div>
     <div>
       <button class="btn accent" onclick="openAddNoteModal()">+ Ajouter une note</button>
-      <label class="btn file-btn">Importer (Excel/CSV)<input type="file" accept=".xlsx,.xls,.csv" onchange="handleNoteImport(this.files)"></label>
+      <label class="btn file-btn">Importer (Excel/CSV/All)<input type="file" accept=".xlsx,.xls,.csv,.ods,.txt" onchange="handleNoteImport(this.files)"></label>
     </div>
   </div>
   <div class="panel">
