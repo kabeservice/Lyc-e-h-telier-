@@ -237,12 +237,13 @@
 
   /* ---------- SYNC STATUS INDICATOR ---------- */
   @keyframes spin{0%{transform:rotate(0deg);} 100%{transform:rotate(360deg);}}
-  #syncStatus{transition:color .3s;}
-  #syncIcon{display:inline-block;}
-  #syncStatus.syncing #syncIcon{animation:spin .8s linear infinite;}
-  #syncStatus.synced{color:#3F7A5E;}
-  #syncStatus.offline{color:#7A8496;}
-  #syncStatus.error{color:#B5453A;}
+  #syncClock{display:flex;flex-direction:column;align-items:flex-end;line-height:1.15;cursor:pointer;padding:3px 10px;border-radius:8px;border:1px solid #D9D6CC;background:#fff;flex:none;}
+  #syncClock .sc-time{font:600 15px/1.1 ui-monospace,Menlo,Consolas,monospace;color:#1B2430;font-variant-numeric:tabular-nums;}
+  #syncClock .sc-state{font-size:11px;color:#7A8496;white-space:nowrap;}
+  #syncClock.ok .sc-state{color:#3F7A5E;}
+  #syncClock.busy .sc-state{color:#B07A1D;}
+  #syncClock.err{border-color:#B5453A;}
+  #syncClock.err .sc-state{color:#B5453A;font-weight:600;}
 
   /* ---------- RESPONSIVE ---------- */
   @media (max-width:900px){
@@ -328,10 +329,10 @@
         </div>
       </div>
       <div class="topbar-right">
-        <span id="realtimeClock" style="font-size:12px;color:#7A8496;font-family:monospace;min-width:120px;">--:--:--</span>
-        <span id="syncStatus" style="font-size:12px;color:#7A8496;display:flex;align-items:center;gap:5px;">
-          <span id="syncIcon">⊙</span><span id="syncText">Hors ligne</span>
-        </span>
+        <div id="syncClock" class="off" onclick="showSyncDetails()" title="État de la synchronisation">
+          <div class="sc-time" id="scTime">--:--:--</div>
+          <div class="sc-state" id="scState">⊙ Hors ligne</div>
+        </div>
         <span id="topbarUserRole"></span>
         <button class="btn sm" id="installAppBtn" onclick="installApp()" style="display:none;">📲 Installer</button>
         <button class="btn sm accent" onclick="openShareModal()">Partager</button>
@@ -1583,7 +1584,6 @@ let firebaseReady = false;   // config présente
 let remoteLoaded = false;    // première lecture réussie => l'écriture est autorisée
 let syncError = null;
 let REST_TIMEOUT_MS = 12000;
-const APP_BUILD = 'v8 (base auto-détectée)';
 const net = {busy:false, err:null, errAt:null, errCode:null, lastOk:null, lastOp:null, reads:0, writes:0, fails:0, dirty:false};
 const diagLog = [];
 
@@ -1837,24 +1837,25 @@ async function pollRemote(){
 }
 
 function updateSyncStatus(){
-  const el = document.getElementById('syncStatus');
-  const icon = document.getElementById('syncIcon');
-  const text = document.getElementById('syncText');
-  if(!el) return;
-  if(!firebaseReady){
-    el.className = 'offline'; icon.textContent = '⊙'; text.textContent = 'Hors ligne'; el.title = '';
-  } else if(net.err && !remoteLoaded || (net.err && net.errAt > net.lastOk)){
-    el.className = 'error'; icon.textContent = '⚠'; text.textContent = 'Erreur ' + fmtT(net.errAt); el.title = net.err;
-  } else if(remoteLoaded){
-    el.className = 'synced'; icon.textContent = '✓'; text.textContent = fmtT(net.lastOk); el.title = 'Dernière synchro ' + fmtT(net.lastOk);
-  } else {
-    el.className = 'syncing'; icon.textContent = '⟳'; text.textContent = 'Connexion…';
-  }
+  const box = document.getElementById('syncClock');
+  if(!box) return;
+  document.getElementById('scTime').textContent = fmtT(new Date());     // horloge en direct
+  let cls, txt;
+  if(!firebaseReady){ cls = 'off'; txt = '⊙ Hors ligne (local)'; }
+  else if(net.busy){ cls = 'busy'; txt = '⟳ Synchronisation…'; }
+  else if(net.err && (!remoteLoaded || net.errAt > net.lastOk)){ cls = 'err'; txt = '⚠ Non synchronisé — toucher'; }
+  else if(remoteLoaded){ cls = net.dirty ? 'busy' : 'ok'; txt = (net.dirty ? '⟳ Envoi en cours · ' : '✓ Synchronisé ') + fmtT(net.lastOk); }
+  else { cls = 'busy'; txt = '⟳ Connexion…'; }
+  box.className = cls;
+  document.getElementById('scState').textContent = txt;
 }
-function showSyncing(){
-  const el = document.getElementById('syncStatus'), icon = document.getElementById('syncIcon'), text = document.getElementById('syncText');
-  if(!el) return;
-  el.className = 'syncing'; icon.textContent = '⟳'; text.textContent = 'Synchronisation...';
+function showSyncing(){ updateSyncStatus(); }
+function renderStrip(){ updateSyncStatus(); }
+function showSyncDetails(){
+  alert('Projet : ' + fsCfg().projectId + ' (base ' + curDb() + ')\n' +
+        'Dernière synchro : ' + fmtT(net.lastOk) + '\n' +
+        'Erreur : ' + (net.err ? '[' + net.errCode + '] ' + net.err : 'aucune') + '\n\n' +
+        diagLog.slice(-8).join('\n'));
 }
 
 function scheduleSave(){
@@ -1889,92 +1890,7 @@ async function saveStateToFirestore(){
   }
 }
 
-/* ---- Bandeau d'état avec horloge (toujours visible) + diagnostic ---- */
-function renderStrip(){
-  const el = document.getElementById('fsStrip');
-  if(!el) return;
-  const now = new Date();
-  let cls, label;
-  if(!firebaseReady){ cls = 'off'; label = 'Hors ligne (mode local)'; }
-  else if(net.busy){ cls = 'busy'; label = 'Synchronisation…'; }
-  else if(net.err && (!remoteLoaded || net.errAt > net.lastOk)){ cls = 'err'; label = 'ERREUR : ' + net.err; }
-  else if(remoteLoaded){
-    const ago = Math.max(0, Math.round((now - net.lastOk) / 1000));
-    cls = net.dirty ? 'busy' : 'ok';
-    label = (net.dirty ? 'Modifs en attente · ' : 'Connecté · ') + 'synchro ' + fmtT(net.lastOk) + ' (il y a ' + ago + ' s)';
-  } else { cls = 'busy'; label = 'Connexion…'; }
-  el.className = cls;
-  el.innerHTML = '<span class="fsdot"></span><b class="fsclock">' + fmtT(now) + '</b><span class="fslabel">' + fsEsc(label) + '</span><span class="fsgo">détails ›</span>';
-  const o = document.getElementById('fsDiag');
-  if(o && o.style.display !== 'none') renderDiagBody();
-}
-function renderDiagBody(){
-  const c = fsCfg();
-  const st = document.getElementById('fsDiagState'); if(!st) return;
-  st.innerHTML =
-    '<div><b>Version :</b> ' + APP_BUILD + '</div>' +
-    '<div><b>Heure :</b> ' + fmtT(new Date()) + '</div>' +
-    '<div><b>Projet :</b> ' + fsEsc(c.projectId) + ' · base « ' + fsEsc(curDb()) + ' »</div>' +
-    '<div><b>Réseau du téléphone :</b> ' + (navigator.onLine ? 'en ligne' : 'HORS LIGNE') + '</div>' +
-    '<div><b>Lecture initiale :</b> ' + (remoteLoaded ? 'OK' : 'pas encore réussie') + '</div>' +
-    '<div><b>Dernier succès :</b> ' + fmtT(net.lastOk) + (net.lastOp ? ' (' + net.lastOp + ')' : '') + '</div>' +
-    '<div><b>Dernière erreur :</b> ' + (net.err ? fmtT(net.errAt) + ' — [' + fsEsc(net.errCode) + '] ' + fsEsc(net.err) : 'aucune') + '</div>' +
-    '<div><b>Compteurs :</b> ' + net.reads + ' lectures, ' + net.writes + ' écritures, ' + net.fails + ' échecs</div>' +
-    '<div><b>Modifs non envoyées :</b> ' + (net.dirty ? 'oui' : 'non') + '</div>';
-  const lg = document.getElementById('fsDiagLog'); if(lg) lg.textContent = diagLog.slice().reverse().join('\n');
-}
-async function runDiagnostics(){
-  const out = document.getElementById('fsDiagOut'); if(!out) return;
-  const lines = [];
-  const show = ()=>{ out.textContent = lines.join('\n'); };
-  const step = async (name, fn)=>{
-    const t0 = Date.now(); lines.push('… ' + name); show();
-    try{ const r = await fn(); lines[lines.length-1] = '✓ ' + name + (r ? ' — ' + r : '') + ' (' + (Date.now()-t0) + ' ms)'; }
-    catch(e){ lines[lines.length-1] = '✗ ' + name + ' — ' + (e.friendly || e.message); }
-    show();
-  };
-  lines.push('Test lancé à ' + fmtT(new Date())); 
-  await step('Le téléphone est en ligne', async ()=>{ if(!navigator.onLine) throw new Error('mode avion / pas de réseau'); });
-  await step('Joindre firestore.googleapis.com', async ()=>{ await fetch('https://firestore.googleapis.com/', {mode:'no-cors', cache:'no-store'}); });
-  await step('Lire app/state', async ()=>{ const d = await restGetDoc('app/state'); return d ? 'document trouvé' : 'document absent (normal au premier lancement)'; });
-  await step('Écrire app/ping (test)', async ()=>{ await restSetDoc('app/ping', {t: new Date().toISOString()}); });
-  const bad = lines.filter(l=>l.startsWith('✗'));
-  lines.push(bad.length ? '\n→ ' + bad.length + ' problème(s). Lisez la ligne ✗ ci-dessus : elle dit quoi corriger.' : '\n→ Tout est OK. Firestore fonctionne.');
-  show();
-  if(!bad.length && !remoteLoaded) loadStateFromFirestore().then(()=>{ if(currentUser) renderAll(); });
-}
-function copyDiagLog(){
-  const txt = 'Projet: ' + fsCfg().projectId + '\nErreur: ' + (net.err||'aucune') + ' [' + (net.errCode||'') + ']\nHost: ' + location.host + '\n\n' + (document.getElementById('fsDiagOut').textContent||'') + '\n\n' + diagLog.join('\n');
-  try{ navigator.clipboard.writeText(txt).then(()=>alert('Journal copié.')); }catch(e){ alert(txt); }
-}
-function initDiagUi(){
-  const st = document.createElement('style');
-  st.textContent = `
-  body{padding-bottom:calc(34px + env(safe-area-inset-bottom,0px)) !important;}
-  #fsStrip{position:fixed;left:0;right:0;bottom:0;z-index:99998;display:flex;align-items:center;gap:8px;padding:7px 12px calc(7px + env(safe-area-inset-bottom,0px));font:12px/1.2 system-ui,sans-serif;color:#fff;background:#1B2430;cursor:pointer;border-top:1px solid rgba(255,255,255,.15)}
-  #fsStrip .fsdot{width:9px;height:9px;border-radius:50%;background:#7A8496;flex:none}
-  #fsStrip.ok .fsdot{background:#3FBF7F} #fsStrip.busy .fsdot{background:#E0A830} #fsStrip.err{background:#8E2F27} #fsStrip.err .fsdot{background:#fff}
-  #fsStrip .fsclock{font-variant-numeric:tabular-nums;flex:none}
-  #fsStrip .fslabel{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.92}
-  #fsStrip .fsgo{opacity:.7;flex:none}
-  #fsDiag{position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.55);display:none;align-items:flex-end;justify-content:center}
-  #fsDiag .box{background:#fff;color:#1B2430;width:100%;max-width:560px;max-height:92%;overflow:auto;border-radius:16px 16px 0 0;padding:16px;font:14px/1.45 system-ui,sans-serif}
-  #fsDiag h3{margin:0 0 8px;font-size:17px} #fsDiag pre{background:#F6F5F1;padding:8px;border-radius:8px;font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow:auto;margin:8px 0}
-  #fsDiag button{font:inherit;padding:9px 12px;border-radius:8px;border:1px solid #C9C6BC;background:#fff;margin:4px 6px 4px 0} #fsDiag button.p{background:#B5651D;color:#fff;border-color:#B5651D}`;
-  document.head.appendChild(st);
-  const strip = document.createElement('div'); strip.id = 'fsStrip'; strip.onclick = ()=>{ document.getElementById('fsDiag').style.display='flex'; renderDiagBody(); };
-  document.body.appendChild(strip);
-  const dg = document.createElement('div'); dg.id = 'fsDiag';
-  dg.innerHTML = '<div class="box"><h3>Diagnostic Firestore</h3><div id="fsDiagState"></div>' +
-    '<div><button class="p" onclick="runDiagnostics()">Tester la connexion</button><button onclick="loadStateFromFirestore().then(()=>{if(currentUser)renderAll();renderDiagBody();})">Réessayer la lecture</button><button onclick="copyDiagLog()">Copier le journal</button><button onclick="document.getElementById(\'fsDiag\').style.display=\'none\'">Fermer</button></div>' +
-    '<pre id="fsDiagOut">Appuyez sur « Tester la connexion ».</pre><b>Journal (récent en haut)</b><pre id="fsDiagLog"></pre></div>';
-  dg.onclick = e=>{ if(e.target === dg) dg.style.display = 'none'; };
-  document.body.appendChild(dg);
-  renderStrip();
-}
-
 // Boucles de fond : horloge 1 s, rattrapage/lecture 5 s, réception des autres appareils 15 s.
-setInterval(renderStrip, 1000);
 setInterval(()=>{
   if(!firebaseReady) return;
   if(!remoteLoaded){ loadStateFromFirestore().then(ok=>{ if(ok){ if(currentUser) renderAll(); updateFirebaseStatus(); } }); }
@@ -1987,7 +1903,6 @@ window.addEventListener('pagehide', ()=>{ saveStateToFirestore(); });
 window.addEventListener('online', ()=>{ dlog('Réseau revenu'); if(!remoteLoaded) loadStateFromFirestore().then(()=>{ if(currentUser) renderAll(); }); else scheduleSave(); });
 
 (function(){
-  initDiagUi();
   // Ancienne config (ex. ancien projet) mémorisée sur cet appareil : on l'abandonne.
   if(localStorage.getItem('firebaseConfigVersion') !== CONFIG_VERSION){
     localStorage.removeItem('firebaseConfig');
