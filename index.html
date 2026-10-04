@@ -1561,13 +1561,17 @@ function handlePhotoUpload(eleveId, files){
 // Utilisée automatiquement au premier chargement si aucune config n'a
 // encore été enregistrée localement (voir bloc d'auto-connexion plus bas).
 const DEFAULT_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyDo54rshWzdSfaOyf6Eq2UIj7swQ5ATcT4",
-  authDomain: "scolaire-c747d.firebaseapp.com",
-  projectId: "scolaire-c747d",
-  storageBucket: "scolaire-c747d.firebasestorage.app",
-  messagingSenderId: "646415728662",
-  appId: "1:646415728662:web:1489ca4e5ab0270b9b7537"
+  apiKey: "AIzaSyDeGiO9j270EUj_GQ3xe6u2lZKhxEtSvlg",
+  authDomain: "edu26-4ce85.firebaseapp.com",
+  projectId: "edu26-4ce85",
+  storageBucket: "edu26-4ce85.firebasestorage.app",
+  messagingSenderId: "59206711808",
+  appId: "1:59206711808:web:4089a4eed384871e56f6e5",
+  measurementId: "G-YVLFH5626X"
 };
+// Change cette valeur pour forcer tous les appareils à abandonner une ancienne
+// config enregistrée localement et à reprendre DEFAULT_FIREBASE_CONFIG.
+const CONFIG_VERSION = 'edu26-4ce85-1';
 
 /* ---- Connexion Firestore via l'API REST (https) ----
    Pourquoi pas le SDK : le SDK utilise un canal WebChannel qui échoue souvent
@@ -1961,6 +1965,11 @@ window.addEventListener('online', ()=>{ dlog('Réseau revenu'); if(!remoteLoaded
 
 (function(){
   initDiagUi();
+  // Ancienne config (ex. ancien projet) mémorisée sur cet appareil : on l'abandonne.
+  if(localStorage.getItem('firebaseConfigVersion') !== CONFIG_VERSION){
+    localStorage.removeItem('firebaseConfig');
+    localStorage.setItem('firebaseConfigVersion', CONFIG_VERSION);
+  }
   const saved = localStorage.getItem('firebaseConfig');
   const ok = saved ? tryInitFirebase(saved) : tryInitFirebase(JSON.stringify(DEFAULT_FIREBASE_CONFIG));
   if(ok){
