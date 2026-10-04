@@ -1594,9 +1594,20 @@ function fsCfg(){
   try{ return JSON.parse(localStorage.getItem('firebaseConfig') || JSON.stringify(DEFAULT_FIREBASE_CONFIG)); }
   catch(e){ return DEFAULT_FIREBASE_CONFIG; }
 }
-function docUrl(path){
+function dbKey(){ return 'firebaseDbId:' + fsCfg().projectId; }
+function curDb(){ try{ return localStorage.getItem(dbKey()) || '(default)'; }catch(e){ return '(default)'; } }
+function setDb(id){ try{ localStorage.setItem(dbKey(), id); }catch(e){} }
+// Le console Firebase peut afficher une base nommée "default" (sans parenthèses) :
+// on essaie donc plusieurs identifiants et on retient celui qui existe.
+function dbCandidates(){ const c = fsCfg(); return [...new Set([c.databaseId, curDb(), '(default)', 'default'].filter(Boolean))]; }
+function docUrl(path, dbId){
   const c = fsCfg();
-  return `https://firestore.googleapis.com/v1/projects/${c.projectId}/databases/(default)/documents/${path}?key=${encodeURIComponent(c.apiKey)}`;
+  return `https://firestore.googleapis.com/v1/projects/${c.projectId}/databases/${encodeURIComponent(dbId || curDb())}/documents/${path}?key=${encodeURIComponent(c.apiKey)}`;
+}
+function isDbMissing(status, text){
+  if(status !== 404) return false;
+  let m = ''; try{ m = JSON.parse(text).error.message || ''; }catch(e){ m = String(text); }
+  return !/^Document/.test(m) && /database/i.test(m);
 }
 
 /* conversion JS <-> format de valeurs Firestore */
@@ -1622,7 +1633,7 @@ function fromFs(v){
 }
 function fieldsToObj(f){ const o = {}; for(const k in (f||{})) o[k] = fromFs(f[k]); return o; }
 
-function restError(status, text){
+function restError(status, text, tried){
   let st = '', msg = '';
   try{ const j = JSON.parse(text); st = (j.error && j.error.status) || ''; msg = (j.error && j.error.message) || ''; }
   catch(e){ msg = String(text).slice(0,200); }
@@ -1630,7 +1641,7 @@ function restError(status, text){
   if(/referer|referrer/i.test(text)) f = 'clé API restreinte : autorisez "' + location.hostname + '" dans Google Cloud > Identifiants > clé API';
   else if(status === 400 && /API key/i.test(msg)) f = 'clé API invalide (vérifiez apiKey dans la config)';
   else if(/has not been used|SERVICE_DISABLED|is disabled/i.test(text)) f = 'API Cloud Firestore non activée pour ce projet (console Google Cloud > API)';
-  else if(status === 404 && /database/i.test(msg)) f = 'base Firestore introuvable : créez-la (console Firebase > Firestore Database > Créer)';
+  else if(status === 404 && /database/i.test(msg)) f = 'base Firestore introuvable' + (tried && tried.length ? ' (essayé : ' + tried.join(', ') + ')' : '') + ' : vérifiez dans la console Firebase que Firestore Database existe dans le projet ' + fsCfg().projectId;
   else if(/exceeds.*size|too large/i.test(msg)) f = 'document trop volumineux (limite Firestore 1 Mo)';
   else if(status === 403 || st === 'PERMISSION_DENIED') f = 'accès refusé par les règles Firestore (autorisez lecture/écriture sur app/state)';
   else if(status === 429) f = 'quota Firestore dépassé';
@@ -1639,28 +1650,38 @@ function restError(status, text){
   return e;
 }
 async function restCall(method, path, body){
-  const ctl = new AbortController();
-  const to = setTimeout(()=>ctl.abort(), REST_TIMEOUT_MS);
   const t0 = Date.now();
-  let res, text;
-  try{
-    res = await fetch(docUrl(path), {
-      method, signal: ctl.signal,
-      headers: body ? {'Content-Type':'application/json'} : undefined,
-      body: body ? JSON.stringify(body) : undefined
-    });
-    text = await res.text();
-  }catch(e){
-    const err = new Error(e.name === 'AbortError'
-      ? 'délai dépassé : réseau trop lent ou firestore.googleapis.com bloqué'
-      : 'réseau inaccessible : impossible de joindre firestore.googleapis.com');
-    err.code = e.name === 'AbortError' ? 'timeout' : 'network'; err.friendly = err.message;
-    dlog(method + ' ' + path + ' → ' + err.code + ' (' + (Date.now()-t0) + ' ms)');
-    throw err;
-  }finally{ clearTimeout(to); }
-  const ms = Date.now() - t0;
-  dlog(method + ' ' + path + ' → HTTP ' + res.status + ' (' + ms + ' ms)');
-  return {status: res.status, text, ms};
+  const tried = [];
+  let last = null;
+  for(const dbId of dbCandidates()){
+    tried.push(dbId);
+    const ctl = new AbortController();
+    const to = setTimeout(()=>ctl.abort(), REST_TIMEOUT_MS);
+    let res, text;
+    try{
+      res = await fetch(docUrl(path, dbId), {
+        method, signal: ctl.signal,
+        headers: body ? {'Content-Type':'application/json'} : undefined,
+        body: body ? JSON.stringify(body) : undefined
+      });
+      text = await res.text();
+    }catch(e){
+      const err = new Error(e.name === 'AbortError'
+        ? 'délai dépassé : réseau trop lent ou firestore.googleapis.com bloqué'
+        : 'réseau inaccessible : impossible de joindre firestore.googleapis.com');
+      err.code = e.name === 'AbortError' ? 'timeout' : 'network'; err.friendly = err.message;
+      dlog(method + ' ' + path + ' → ' + err.code + ' (' + (Date.now()-t0) + ' ms)');
+      throw err;
+    }finally{ clearTimeout(to); }
+    const ms = Date.now() - t0;
+    dlog(method + ' ' + path + ' [' + dbId + '] → HTTP ' + res.status + ' (' + ms + ' ms)');
+    if(res.status >= 400) dlog('   réponse : ' + String(text).replace(/\s+/g,' ').slice(0,220));
+    if(isDbMissing(res.status, text)){ last = {status: res.status, text, ms}; continue; }   // autre identifiant de base
+    if(dbId !== curDb()){ setDb(dbId); dlog('Base Firestore détectée : ' + dbId); }
+    return {status: res.status, text, ms};
+  }
+  last.tried = tried;
+  return last;
 }
 async function restGetDoc(path){
   const r = await restCall('GET', path);
@@ -1669,12 +1690,12 @@ async function restGetDoc(path){
     let m = ''; try{ m = JSON.parse(r.text).error.message || ''; }catch(e){}
     if(/^Document/.test(m)) return null;              // le document n'existe pas encore : normal
   }
-  throw restError(r.status, r.text);
+  throw restError(r.status, r.text, r.tried);
 }
 async function restSetDoc(path, obj){
   const r = await restCall('PATCH', path, {fields: objToFields(obj)});
   if(r.status >= 200 && r.status < 300) return true;
-  throw restError(r.status, r.text);
+  throw restError(r.status, r.text, r.tried);
 }
 
 function tryInitFirebase(configStr){
@@ -1891,7 +1912,7 @@ function renderDiagBody(){
   const st = document.getElementById('fsDiagState'); if(!st) return;
   st.innerHTML =
     '<div><b>Heure :</b> ' + fmtT(new Date()) + '</div>' +
-    '<div><b>Projet :</b> ' + fsEsc(c.projectId) + '</div>' +
+    '<div><b>Projet :</b> ' + fsEsc(c.projectId) + ' · base « ' + fsEsc(curDb()) + ' »</div>' +
     '<div><b>Réseau du téléphone :</b> ' + (navigator.onLine ? 'en ligne' : 'HORS LIGNE') + '</div>' +
     '<div><b>Lecture initiale :</b> ' + (remoteLoaded ? 'OK' : 'pas encore réussie') + '</div>' +
     '<div><b>Dernier succès :</b> ' + fmtT(net.lastOk) + (net.lastOp ? ' (' + net.lastOp + ')' : '') + '</div>' +
