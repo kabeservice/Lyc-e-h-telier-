@@ -1583,6 +1583,7 @@ let firebaseReady = false;   // config présente
 let remoteLoaded = false;    // première lecture réussie => l'écriture est autorisée
 let syncError = null;
 let REST_TIMEOUT_MS = 12000;
+const APP_BUILD = 'v8 (base auto-détectée)';
 const net = {busy:false, err:null, errAt:null, errCode:null, lastOk:null, lastOp:null, reads:0, writes:0, fails:0, dirty:false};
 const diagLog = [];
 
@@ -1911,6 +1912,7 @@ function renderDiagBody(){
   const c = fsCfg();
   const st = document.getElementById('fsDiagState'); if(!st) return;
   st.innerHTML =
+    '<div><b>Version :</b> ' + APP_BUILD + '</div>' +
     '<div><b>Heure :</b> ' + fmtT(new Date()) + '</div>' +
     '<div><b>Projet :</b> ' + fsEsc(c.projectId) + ' · base « ' + fsEsc(curDb()) + ' »</div>' +
     '<div><b>Réseau du téléphone :</b> ' + (navigator.onLine ? 'en ligne' : 'HORS LIGNE') + '</div>' +

@@ -1,6 +1,6 @@
 // Service worker minimal — met l'app en cache pour un fonctionnement hors-ligne
 // et pour que le navigateur propose "Installer l'application".
-const CACHE_NAME = 'hotellerie-app-v7';
+const CACHE_NAME = 'hotellerie-app-v8';
 const ASSETS = [
   './',
   './index.html',
@@ -31,7 +31,7 @@ self.addEventListener('fetch', (event) => {
   // Réseau d'abord, secours sur le cache si hors-ligne (les données réelles
   // viendront de Firestore, qui gère son propre cache/offline séparément).
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, {cache: 'no-store'})
       .then((res) => {
         const resClone = res.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, resClone)).catch(()=>{});
