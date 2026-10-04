@@ -357,7 +357,10 @@
     <input type="text" id="newTeacherSubject" placeholder="ex : Mathématiques">
     <label>Identifiant</label>
     <input type="text" id="newTeacherLogin" placeholder="généré automatiquement">
-    <div class="warn-note">Un mot de passe temporaire sera généré. La personne devra le changer à sa première connexion.</div>
+    <label>Mot de passe</label>
+    <input type="text" id="newTeacherPass" placeholder="Choisissez un mot de passe (4 caractères min.)" autocomplete="off">
+    <button class="btn sm" type="button" style="margin-top:6px;" onclick="document.getElementById('newTeacherPass').value=genPassword()">Générer un mot de passe</button>
+    <div class="warn-note">Notez ce mot de passe et communiquez-le à la personne.</div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal('modalAddTeacher')">Annuler</button>
       <button class="btn accent" onclick="createTeacher()">Créer le compte</button>
@@ -434,7 +437,7 @@
     <label>Nom de la classe</label>
     <input type="text" id="newClasseNom" placeholder="ex : 6ème A">
     <label>Niveau</label>
-    <input type="text" id="newClasseNiveau" placeholder="ex : 6ème">
+    <input type="text" id="newClasseNiveau" placeholder="ex : Seconde, Première, Terminale" list="niveauxLycee"><datalist id="niveauxLycee"><option value="Seconde"><option value="Première"><option value="Terminale"></datalist>
     <label>Professeur principal</label>
     <input type="text" id="newClasseProf" placeholder="ex : M. Farah">
     <div class="modal-actions">
@@ -534,6 +537,8 @@
    Tout se construit depuis l'app : classes, élèves, enseignants,
    notes, examens. Rien n'est pré-rempli.
    ============================================================ */
+let MODULES = [];     // {id, nom}
+let LECONS = [];      // {id, moduleId, titre, classeId, type, url, fileName, size, path, date, auteur}
 let CLASSES = [];      // {id, nom, niveau, prof}
 let ELEVES = [];        // {id, mat, nom, sexe, classeId, tel, parent, parentTel, parentId, adresse, ecole, photo, documents:[]}
 let DOSSIERS = {};      // eleveId -> [{date, type, detail}]
@@ -552,7 +557,13 @@ const DOSSIER_TYPES = {
 };
 
 function uid(prefix){ return prefix + Date.now().toString(36) + Math.floor(Math.random()*1000); }
-function nextMatricule(){ return String(2600 + ELEVES.length + 1); }
+function nextMatricule(){
+  const used = new Set(ELEVES.map(e=>String(e.mat)));
+  const nums = ELEVES.map(e=>parseInt(e.mat,10)).filter(x=>!isNaN(x));
+  let n = Math.max(2600, ...nums) + 1;
+  while(used.has(String(n))) n++;
+  return String(n);
+}
 
 /* ============================================================
    COMPTES & AUTHENTIFICATION
@@ -640,7 +651,7 @@ const PAGES = [
   {id:'notes', label:'Notes', ico:'✎', roles:['direction','enseignant','developpeur']},
   {id:'examens', label:'Examens', ico:'▦', roles:['direction','enseignant','developpeur']},
   {id:'cours', label:'Cours & Programme', ico:'▥', roles:['direction','enseignant','developpeur']},
-  {id:'anglais', label:'Module Anglais', ico:'A', roles:['direction','enseignant','developpeur']},
+  {id:'modules', label:'Modules & Leçons', ico:'▥', roles:['direction','enseignant','developpeur']},
   {id:'rapports', label:'Rapports', ico:'▧', roles:['direction','developpeur']},
   {id:'calendrier', label:'Calendrier', ico:'▨', roles:['direction','enseignant','surveillant','developpeur']},
   {id:'utilisateurs', label:'Utilisateurs', ico:'◐', roles:['direction','developpeur']},
@@ -685,7 +696,7 @@ function pageSubtitle(id){
     notes: NOTES.length + ' note(s) saisie(s)',
     examens: EXAMENS.length + ' évaluation(s) planifiée(s)',
     cours:'Emplois du temps et progression',
-    anglais:'Suivi spécifique — niveaux CECR',
+    modules: MODULES.length + ' module(s) · ' + LECONS.length + ' leçon(s)',
     rapports:'Bulletins et statistiques',
     calendrier:'Calendrier de l\'établissement',
     utilisateurs:'Comptes et permissions',
@@ -775,7 +786,7 @@ pageWrap('classes', `
     <div><button class="btn accent" onclick="openModal('modalAddClasse')">+ Nouvelle classe</button></div>
   </div>
   <div class="panel">
-    <table><thead><tr><th>Classe</th><th>Niveau</th><th>Effectif</th><th>Professeur principal</th></tr></thead><tbody id="classesTableBody"></tbody></table>
+    <table><thead><tr><th>Classe</th><th>Niveau</th><th>Effectif</th><th>Professeur principal</th><th></th></tr></thead><tbody id="classesTableBody"></tbody></table>
   </div>
 `);
 function renderClassesTable(){
@@ -783,9 +794,9 @@ function renderClassesTable(){
   document.getElementById('classesTableBody').innerHTML = CLASSES.length
     ? CLASSES.map(c=>{
         const eff = ELEVES.filter(e=>e.classeId===c.id).length;
-        return `<tr><td>${c.nom}</td><td>${c.niveau}</td><td>${eff}</td><td>${c.prof||'—'}</td></tr>`;
+        return `<tr><td>${c.nom}</td><td>${c.niveau}</td><td>${eff}</td><td>${c.prof||'—'}</td><td><button class="btn sm" onclick="openClasse('${c.id}')">Élèves</button></td></tr>`;
       }).join('')
-    : emptyRow(4, 'Aucune classe. Cliquez sur "+ Nouvelle classe" pour commencer.');
+    : emptyRow(5, 'Aucune classe. Cliquez sur "+ Nouvelle classe" pour commencer.');
 }
 function createClasse(){
   const nom = document.getElementById('newClasseNom').value.trim();
@@ -970,22 +981,27 @@ function getField(row, ...names){
   }
   return '';
 }
-function handleEleveImport(files){
+function handleEleveImport(files, forcedClassId){
   if(!files.length) return;
   const importTime = new Date();
   const timeStr = String(importTime.getHours()).padStart(2,'0') + ':' + String(importTime.getMinutes()).padStart(2,'0') + ':' + String(importTime.getSeconds()).padStart(2,'0');
   const isOnline = firebaseReady && db;
   
   readSpreadsheet(files[0], (rows)=>{
-    let added = 0;
+    let added = 0, unassigned = 0, conflicts = 0;
+    const forcedId = forcedClassId || (document.getElementById('elevesClassFilter') || {}).value || '';
+    const forcedClasse = forcedId ? CLASSES.find(c=>c.id===forcedId) : null;
     rows.forEach(row=>{
       const nom = getField(row,'nom','name','eleve','élève');
       if(!nom) return;
       const classeNom = getField(row,'classe','class');
-      const classe = CLASSES.find(c=>c.nom.toLowerCase()===String(classeNom).toLowerCase());
+      const classe = forcedClasse || CLASSES.find(c=>c.nom.toLowerCase()===String(classeNom).toLowerCase());
+      if(!classe) unassigned++;
+      let mat = String(getField(row,'matricule','mat','immatriculation','numero matricule','n matricule') || '').trim();
+      if(!mat || ELEVES.some(e=>String(e.mat)===mat)){ if(mat) conflicts++; mat = nextMatricule(); }
       const id = uid('el');
       ELEVES.push({
-        id, mat: nextMatricule(), nom: String(nom),
+        id, mat, nom: String(nom),
         sexe: getField(row,'sexe','genre'),
         classeId: classe ? classe.id : '',
         tel: getField(row,'telephone','tel','téléphone'),
@@ -999,12 +1015,15 @@ function handleEleveImport(files){
       DOSSIERS[id] = [];
       added++;
     });
-    document.querySelectorAll('#page-eleves input[type=file]').forEach(i=>i.value='');
+    document.querySelectorAll('#page-eleves input[type=file], #modalClasse input[type=file]').forEach(i=>i.value='');
     renderAll();
+    const summary = added + ' élève(s) importé(s)' + (forcedClasse ? ' dans la classe ' + forcedClasse.nom : '') +
+      (unassigned ? '\n⚠ ' + unassigned + ' sans classe : choisissez une classe dans le filtre avant d\'importer, ou ouvrez la classe puis « Importer ».' : '') +
+      (conflicts ? '\n⚠ ' + conflicts + ' matricule(s) déjà utilisé(s) : remplacé(s) automatiquement.' : '');
     
     if(isOnline){
       saveStateToFirestore();
-      alert(`${added} élève(s) importé(s) à ${timeStr}\n\n✓ ONLINE - Sauvegarde sur Firestore en cours...`);
+      alert(summary + '\n\nSauvegarde en cours…');
     } else {
       alert(`❌ ERREUR: Firestore n'est pas connecté à ${timeStr}\n\nVérifiez: "✓ Connecté" en haut à droite`);
     }
@@ -1216,14 +1235,28 @@ pageWrap('cours', `
   <div class="stub-banner">Emploi du temps interactif par classe et par enseignant à développer en Phase 2.</div>
 `);
 
-/* ---------- ANGLAIS ---------- */
-pageWrap('anglais', `
-  <div class="kpi-strip">
-    <div><b id="angElevesCount">0</b>élèves suivis</div>
-    <div><b id="angEnsCount">0</b>enseignant(s) dédié(s)</div>
+/* ---------- MODULES & LEÇONS ---------- */
+pageWrap('modules', `
+  <div class="panel"><h3>Modules (matières)</h3>
+    <div id="modChips" class="subtle" style="margin-bottom:8px;">Aucun module.</div>
+    <div id="modCreate">
+      <input type="text" id="newModNom" placeholder="Nouveau module : Anglais, Mathématiques, Cuisine…">
+      <button class="btn accent" style="margin-top:8px;" onclick="addModule()">+ Ajouter le module</button>
+    </div>
   </div>
-  <div class="panel"><p class="subtle">Aucun suivi CECR enregistré pour le moment.</p></div>
-  <div class="stub-banner">Module dédié au suivi des compétences orales et écrites en anglais, distinct du bulletin général.</div>
+  <div class="panel"><h3>Publier une leçon</h3>
+    <label>Module</label><select id="lecModule"></select>
+    <label>Titre</label><input type="text" id="lecTitre" placeholder="ex : Chapitre 1 — Les temps du passé">
+    <label>Classe (facultatif)</label><select id="lecClasse"></select>
+    <label>Fichier (PDF, vidéo, audio, image, document…)</label><input type="file" id="lecFile">
+    <label>ou lien (YouTube, Drive…)</label><input type="text" id="lecUrl" placeholder="https://…">
+    <button class="btn accent" id="lecBtn" style="margin-top:10px;" onclick="addLecon()">Publier la leçon</button>
+    <div class="subtle" id="lecMsg" style="margin-top:6px;"></div>
+  </div>
+  <div class="panel"><h3>Leçons</h3>
+    <select id="lecFilter" onchange="renderModules()"></select>
+    <table><thead><tr><th>Leçon</th><th></th></tr></thead><tbody id="lecBody"></tbody></table>
+  </div>
 `);
 
 /* ---------- RAPPORTS ---------- */
@@ -1355,6 +1388,8 @@ function renderAll(){
   renderNotesTable();
   renderExamensTable();
   renderUsersPage();
+  renderModules();
+  renderClasseModal();
   updateFirebaseStatus();
   const cc = document.getElementById('coursClasses'); if(cc) cc.textContent = CLASSES.length;
   const ce = document.getElementById('coursEleves'); if(ce) ce.textContent = ELEVES.length;
@@ -1407,16 +1442,18 @@ function createTeacher(){
   const role = document.getElementById('newTeacherRole').value;
   const manualLogin = document.getElementById('newTeacherLogin').value.trim();
   const login = manualLogin || name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z ]/g,'').trim().split(' ').reverse().join('.') || ('utilisateur' + (USERS.length+1));
-  const tempPass = genPassword();
+  const tempPass = document.getElementById('newTeacherPass').value.trim();
+  if(tempPass.length < 4){ alert('Le mot de passe doit faire au moins 4 caractères.'); return; }
+  if(USERS.some(u=>u.login===login)){ alert('Cet identifiant existe déjà. Choisissez-en un autre.'); return; }
   const defaultPoste = role==='direction' ? 'Proviseur' : role==='developpeur' ? 'Développeur plateforme' : role==='surveillant' ? 'Surveillant' : 'Enseignant';
   USERS.push({id: uid('u'), login, nom:name, role, pass:tempPass, poste: document.getElementById('newTeacherSubject').value.trim() || defaultPoste});
   saveUsersToLocal();
-  ['newTeacherName','newTeacherSubject','newTeacherLogin'].forEach(id=>document.getElementById(id).value='');
+  ['newTeacherName','newTeacherSubject','newTeacherLogin','newTeacherPass'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('newTeacherRole').value = 'enseignant';
   closeModal('modalAddTeacher');
   renderUsersPage();
   scheduleSave();
-  alert(`Compte créé.\nIdentifiant : ${login}\nMot de passe temporaire : ${tempPass}\n\nCommuniquez ces informations à la personne — elle devra le changer à la première connexion.`);
+  alert(`Compte créé.\nIdentifiant : ${login}\nMot de passe : ${tempPass}\n\nCommuniquez ces informations à la personne.`);
 }
 let resetTargetId = null;
 function openResetModal(userId){
@@ -1428,7 +1465,10 @@ function openResetModal(userId){
 }
 function doResetPassword(){
   const u = USERS.find(x=>x.id===resetTargetId);
-  const newPass = genPassword();
+  const typed = prompt('Nouveau mot de passe pour ' + u.nom + '\n(laisser vide pour en générer un automatiquement)');
+  if(typed === null) return;
+  const newPass = typed.trim() || genPassword();
+  if(newPass.length < 4){ alert('Au moins 4 caractères.'); return; }
   u.pass = newPass;
   saveUsersToLocal();
   document.getElementById('resetPwResult').innerHTML = `<div class="pw-reveal">Nouveau mot de passe : ${newPass}</div>`;
@@ -1553,6 +1593,145 @@ function handlePhotoUpload(eleveId, files){
   const reader = new FileReader();
   reader.onload = function(ev){ e.photo = ev.target.result; openStudentProfile(eleveId); renderElevesTable(); };
   reader.readAsDataURL(files[0]);
+}
+
+/* ---------- LISTE D'UNE CLASSE (élèves + contrôle des matricules) ---------- */
+let currentClasseId = null;
+function openClasse(id){
+  currentClasseId = id;
+  if(!document.getElementById('modalClasse')){
+    const d = document.createElement('div'); d.className = 'modal'; d.id = 'modalClasse';
+    d.innerHTML = '<div class="modal-card" style="max-width:680px;width:96%;max-height:90vh;overflow:auto;"><div id="classeModalBody"></div><div class="modal-actions"><button class="btn" onclick="closeModal(\'modalClasse\');currentClasseId=null;">Fermer</button></div></div>';
+    document.body.appendChild(d);
+  }
+  renderClasseModal(true); openModal('modalClasse');
+}
+function renderClasseModal(force){
+  const m = document.getElementById('modalClasse');
+  if(!m || !currentClasseId || !m.classList.contains('open') && !force) return;
+  if(!force && m.contains(document.activeElement) && document.activeElement.tagName === 'INPUT' && document.activeElement.type !== 'file') return;  // ne pas gêner la saisie
+  const c = CLASSES.find(x=>x.id===currentClasseId); if(!c) return;
+  const list = ELEVES.filter(e=>e.classeId===c.id).slice().sort((a,b)=>String(a.mat).localeCompare(String(b.mat), undefined, {numeric:true}));
+  document.getElementById('classeModalBody').innerHTML =
+    `<h3>${fsEsc(c.nom)} — ${fsEsc(c.niveau)}</h3><p class="subtle">${list.length} élève(s)${c.prof ? ' · Prof. principal : ' + fsEsc(c.prof) : ''}</p>
+     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+       <label class="btn file-btn accent">Importer une liste (Excel/CSV)<input type="file" accept=".xlsx,.xls,.csv,.ods,.txt" onchange="handleEleveImport(this.files,'${c.id}')"></label>
+       <button class="btn" onclick="closeModal('modalClasse');openAddEleveModal();document.getElementById('newEleveClasse').value='${c.id}';">+ Nouvel élève</button>
+     </div>
+     <p class="subtle">Colonnes reconnues dans le fichier : nom, sexe, matricule (facultatif), téléphone, parent… Tous les élèves importés ici vont dans cette classe.</p>
+     <table><thead><tr><th>Matricule</th><th>Nom</th><th>Sexe</th></tr></thead><tbody>` +
+    (list.length ? list.map(e=>`<tr><td><input type="text" value="${fsEsc(e.mat)}" style="width:90px;" onchange="setMatricule('${e.id}', this)"></td><td><span class="clickable-name" onclick="closeModal('modalClasse');openStudentProfile('${e.id}')">${fsEsc(e.nom)}</span></td><td>${fsEsc(e.sexe||'—')}</td></tr>`).join('')
+                 : '<tr><td colspan="3" class="subtle">Aucun élève dans cette classe.</td></tr>') + '</tbody></table>';
+}
+function setMatricule(id, input){
+  const e = ELEVES.find(x=>x.id===id); if(!e) return;
+  const v = input.value.trim();
+  if(!v){ alert('Le matricule ne peut pas être vide.'); input.value = e.mat; return; }
+  const dup = ELEVES.find(x=>x.id!==id && String(x.mat)===v);
+  if(dup){ alert('Ce matricule est déjà attribué à ' + dup.nom + '.'); input.value = e.mat; return; }
+  e.mat = v; renderAll();
+}
+
+/* ============================================================
+   MODULES & LEÇONS (fichiers dans Firebase Storage, ou simple lien)
+   ============================================================ */
+const LEC_ICON = {pdf:'📄 PDF', video:'🎬 Vidéo', audio:'🔊 Audio', image:'🖼 Image', doc:'📝 Document', lien:'🔗 Lien', autre:'📎 Fichier'};
+function canManageModules(){ return currentUser && (currentUser.role==='direction' || currentUser.role==='developpeur'); }
+function safeUrl(u){ return /^https?:\/\//i.test(u) ? u : '#'; }
+function fileKind(name, type){
+  const n = (name||'').toLowerCase(), t = type||'';
+  if(/\.pdf$/.test(n) || t==='application/pdf') return 'pdf';
+  if(t.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi)$/.test(n)) return 'video';
+  if(t.startsWith('audio/') || /\.(mp3|wav|m4a|ogg)$/.test(n)) return 'audio';
+  if(t.startsWith('image/')) return 'image';
+  if(/\.(docx?|pptx?|xlsx?|odt|txt)$/.test(n)) return 'doc';
+  return 'autre';
+}
+function keepSelect(id, html){
+  const el = document.getElementById(id); if(!el) return;
+  const v = el.value; el.innerHTML = html; if([...el.options].some(o=>o.value===v)) el.value = v;
+}
+function renderModules(){
+  if(!document.getElementById('lecBody')) return;
+  const manage = canManageModules();
+  document.getElementById('modChips').innerHTML = MODULES.length
+    ? MODULES.map(m=>`<span class="role-badge enseignant" style="margin:0 6px 6px 0;display:inline-block;">${fsEsc(m.nom)} (${LECONS.filter(l=>l.moduleId===m.id).length})${manage?` <a href="#" onclick="deleteModule('${m.id}');return false;" style="color:#B5453A;text-decoration:none;">✕</a>`:''}</span>`).join('')
+    : 'Aucun module pour le moment.';
+  document.getElementById('modCreate').style.display = manage ? 'block' : 'none';
+  keepSelect('lecModule', MODULES.map(m=>`<option value="${m.id}">${fsEsc(m.nom)}</option>`).join(''));
+  keepSelect('lecClasse', '<option value="">Toutes les classes</option>' + CLASSES.map(c=>`<option value="${c.id}">${fsEsc(c.nom)}</option>`).join(''));
+  keepSelect('lecFilter', '<option value="">Tous les modules</option>' + MODULES.map(m=>`<option value="${m.id}">${fsEsc(m.nom)}</option>`).join(''));
+  const f = document.getElementById('lecFilter').value;
+  const rows = LECONS.filter(l=>!f || l.moduleId===f).slice().reverse();
+  document.getElementById('lecBody').innerHTML = rows.length ? rows.map(l=>{
+    const m = MODULES.find(x=>x.id===l.moduleId), c = CLASSES.find(x=>x.id===l.classeId);
+    const mine = manage || (currentUser && l.auteur===currentUser.nom);
+    return `<tr><td><a href="${fsEsc(safeUrl(l.url))}" target="_blank" rel="noopener"><b>${fsEsc(l.titre)}</b></a>
+      <div class="subtle">${LEC_ICON[l.type]||LEC_ICON.autre} · ${fsEsc(m?m.nom:'—')} · ${fsEsc(c?c.nom:'Toutes classes')} · ${fsEsc(l.auteur||'')} · ${fsEsc(l.date||'')}${l.size?' · '+(l.size/1048576).toFixed(1)+' Mo':''}</div></td>
+      <td>${mine?`<button class="btn sm" onclick="deleteLecon('${l.id}')">Supprimer</button>`:''}</td></tr>`;
+  }).join('') : '<tr><td colspan="2" class="subtle">Aucune leçon publiée.</td></tr>';
+}
+function addModule(){
+  const el = document.getElementById('newModNom'), nom = el.value.trim();
+  if(!nom){ alert('Indiquez le nom du module.'); return; }
+  if(MODULES.some(m=>m.nom.toLowerCase()===nom.toLowerCase())){ alert('Ce module existe déjà.'); return; }
+  MODULES.push({id: uid('mod'), nom}); el.value = ''; renderAll();
+}
+function deleteModule(id){
+  const n = LECONS.filter(l=>l.moduleId===id).length;
+  if(!confirm('Supprimer ce module' + (n ? ' et ses ' + n + ' leçon(s)' : '') + ' ?')) return;
+  LECONS.filter(l=>l.moduleId===id && l.path).forEach(deleteStorageFile);
+  MODULES = MODULES.filter(m=>m.id!==id); LECONS = LECONS.filter(l=>l.moduleId!==id); renderAll();
+}
+function storageUrl(path, extra){
+  return `https://firebasestorage.googleapis.com/v0/b/${fsCfg().storageBucket}/o` + (path ? '/' + encodeURIComponent(path) : '') + (extra||'');
+}
+async function uploadFile(file, id){
+  const path = 'lecons/' + id + '-' + file.name.replace(/[^\w.\-]+/g, '_');
+  let r;
+  try{ r = await fetch(storageUrl('', '?name=' + encodeURIComponent(path)), {method:'POST', headers:{'Content-Type': file.type || 'application/octet-stream'}, body:file}); }
+  catch(e){ const err = new Error('réseau inaccessible'); err.friendly = err.message; throw err; }
+  const t = await r.text();
+  if(!r.ok){
+    let m = ''; try{ m = JSON.parse(t).error.message; }catch(e){}
+    const err = new Error(r.status===404 ? 'Firebase Storage non activé (console Firebase > Storage > Commencer)'
+      : (r.status===401 || r.status===403) ? 'règles Storage : autorisez l\'écriture (allow read, write: if true;)'
+      : 'HTTP ' + r.status + ' ' + m);
+    err.friendly = err.message; throw err;
+  }
+  const j = JSON.parse(t), tok = (j.downloadTokens || '').split(',')[0];
+  return {type: fileKind(file.name, file.type), url: storageUrl(j.name, '?alt=media' + (tok ? '&token=' + tok : '')), fileName: file.name, size: file.size, path: j.name};
+}
+function deleteStorageFile(l){ try{ fetch(storageUrl(l.path), {method:'DELETE'}).catch(()=>{}); }catch(e){} }
+async function addLecon(){
+  const g = id=>document.getElementById(id);
+  const moduleId = g('lecModule').value, titre = g('lecTitre').value.trim(), file = g('lecFile').files[0];
+  let url = g('lecUrl').value.trim();
+  if(!moduleId){ alert('Créez d\'abord un module.'); return; }
+  if(!titre){ alert('Indiquez le titre de la leçon.'); return; }
+  if(!file && !url){ alert('Choisissez un fichier ou collez un lien.'); return; }
+  const rec = {id: uid('lc'), moduleId, titre, classeId: g('lecClasse').value, type:'lien', url:'', fileName:'', size:0, path:'', date: new Date().toISOString().slice(0,10), auteur: currentUser ? currentUser.nom : ''};
+  g('lecBtn').disabled = true;
+  try{
+    if(file){ g('lecMsg').textContent = 'Envoi du fichier en cours…'; Object.assign(rec, await uploadFile(file, rec.id)); }
+    else{
+      if(!/^https?:\/\//i.test(url)) url = 'https://' + url;
+      rec.url = url; rec.type = /youtu\.?be|vimeo/i.test(url) ? 'video' : /\.pdf(\?|$)/i.test(url) ? 'pdf' : 'lien';
+    }
+    LECONS.push(rec);
+    ['lecTitre','lecUrl','lecFile'].forEach(i=>g(i).value = '');
+    g('lecMsg').textContent = 'Leçon publiée ✓';
+    renderAll();
+  }catch(e){
+    g('lecMsg').textContent = '';
+    alert('Envoi impossible : ' + (e.friendly || e.message) + '\n\nVous pouvez toujours publier la leçon avec un lien (YouTube, Drive…).');
+  }
+  g('lecBtn').disabled = false;
+}
+function deleteLecon(id){
+  if(!confirm('Supprimer cette leçon ?')) return;
+  const l = LECONS.find(x=>x.id===id); if(l && l.path) deleteStorageFile(l);
+  LECONS = LECONS.filter(x=>x.id!==id); renderAll();
 }
 
 /* ============================================================
@@ -1751,7 +1930,7 @@ function stateCore(){
   return JSON.parse(JSON.stringify({
     CLASSES,
     ELEVES: ELEVES.map(e=>{ const {photo, documents, ...rest} = e; return rest; }),
-    DOSSIERS, ENSEIGNANTS, NOTES, EXAMENS, USERS
+    DOSSIERS, ENSEIGNANTS, NOTES, EXAMENS, USERS, MODULES, LECONS
   }));
 }
 function stateJson(){ return JSON.stringify(stateCore()); }
@@ -1764,6 +1943,8 @@ function applyRemoteState(data){
   if(data.ENSEIGNANTS) ENSEIGNANTS = data.ENSEIGNANTS;
   if(data.NOTES) NOTES = data.NOTES;
   if(data.EXAMENS) EXAMENS = data.EXAMENS;
+  if(data.MODULES) MODULES = data.MODULES;
+  if(data.LECONS) LECONS = data.LECONS;
   if(data.USERS){
     const devDefault = USERS.find(u=>u.id==='dev-default');
     const remote = data.USERS.filter(u=>u.id !== 'dev-default');

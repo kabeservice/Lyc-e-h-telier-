@@ -1,7 +1,7 @@
 {
   "name": "Hôtellerie",
   "short_name": "Hôtellerie",
-  "description": "Gestion des élèves, enseignants, présences, notes et examens.",
+  "description": "Lycée Technique — élèves, enseignants, présences, notes, examens et leçons.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

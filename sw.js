@@ -1,6 +1,6 @@
 // Service worker minimal — met l'app en cache pour un fonctionnement hors-ligne
 // et pour que le navigateur propose "Installer l'application".
-const CACHE_NAME = 'hotellerie-app-v9';
+const CACHE_NAME = 'hotellerie-app-v11';
 const ASSETS = [
   './',
   './index.html',
