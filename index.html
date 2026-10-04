@@ -245,6 +245,7 @@
   #syncStatus.syncing #syncIcon{animation:spin .8s linear infinite;}
   #syncStatus.synced{color:#3F7A5E;}
   #syncStatus.offline{color:#7A8496;}
+  #syncStatus.error{color:#B5453A;}
 
   /* ---------- RESPONSIVE ---------- */
   @media (max-width:900px){
@@ -330,6 +331,7 @@
         </div>
       </div>
       <div class="topbar-right">
+        <span id="realtimeClock" style="font-size:12px;color:#7A8496;font-family:monospace;min-width:120px;">--:--:--</span>
         <span id="syncStatus" style="font-size:12px;color:#7A8496;display:flex;align-items:center;gap:5px;">
           <span id="syncIcon">⊙</span><span id="syncText">Hors ligne</span>
         </span>
@@ -972,6 +974,10 @@ function getField(row, ...names){
 }
 function handleEleveImport(files){
   if(!files.length) return;
+  const importTime = new Date();
+  const timeStr = String(importTime.getHours()).padStart(2,'0') + ':' + String(importTime.getMinutes()).padStart(2,'0') + ':' + String(importTime.getSeconds()).padStart(2,'0');
+  const isOnline = firebaseReady && db;
+  
   readSpreadsheet(files[0], (rows)=>{
     let added = 0;
     rows.forEach(row=>{
@@ -997,7 +1003,13 @@ function handleEleveImport(files){
     });
     document.querySelectorAll('#page-eleves input[type=file]').forEach(i=>i.value='');
     renderAll();
-    alert(added + ' élève(s) importé(s).\nColonnes reconnues : Nom, Sexe, Classe, Téléphone, Parent, Téléphone parent, Pièce d\'identité parent, Adresse, École précédente.\n(Si "Classe" ne correspond à aucune classe existante, créez-la puis réimportez, ou modifiez la fiche de l\'élève.)');
+    
+    if(isOnline){
+      saveStateToFirestore();
+      alert(`${added} élève(s) importé(s) à ${timeStr}\n\n✓ ONLINE - Sauvegarde sur Firestore en cours...`);
+    } else {
+      alert(`❌ ERREUR: Firestore n'est pas connecté à ${timeStr}\n\nVérifiez: "✓ Connecté" en haut à droite`);
+    }
   });
 }
 
@@ -1135,6 +1147,10 @@ function createNote(){
 }
 function handleNoteImport(files){
   if(!files.length) return;
+  const importTime = new Date();
+  const timeStr = String(importTime.getHours()).padStart(2,'0') + ':' + String(importTime.getMinutes()).padStart(2,'0') + ':' + String(importTime.getSeconds()).padStart(2,'0');
+  const isOnline = firebaseReady && db;
+  
   readSpreadsheet(files[0], (rows)=>{
     let added = 0;
     rows.forEach(row=>{
@@ -1147,7 +1163,13 @@ function handleNoteImport(files){
     });
     document.querySelectorAll('#page-notes input[type=file]').forEach(i=>i.value='');
     renderAll();
-    alert(added + ' note(s) importée(s).\nColonnes reconnues : Élève, Matière, Note, Appréciation.');
+    
+    if(isOnline){
+      saveStateToFirestore();
+      alert(`${added} note(s) importée(s) à ${timeStr}\n\n✓ ONLINE - Sauvegarde sur Firestore en cours...`);
+    } else {
+      alert(`❌ ERREUR: Firestore n'est pas connecté à ${timeStr}\n\nVérifiez: "✓ Connecté" en haut à droite`);
+    }
   });
 }
 
@@ -1551,7 +1573,12 @@ const DEFAULT_FIREBASE_CONFIG = {
 };
 
 let db = null;
-let firebaseReady = false;
+let firebaseReady = false;   // SDK initialisé
+let remoteLoaded = false;    // première lecture réussie => l'écriture est autorisée
+let syncError = null;        // dernier message d'erreur de synchronisation
+let unsubscribeRemote = null;
+const STATE_REF = () => db.collection('app').doc('state');
+
 function tryInitFirebase(configStr){
   if(typeof firebase === 'undefined'){
     alert("Le SDK Firebase n'a pas pu se charger (vérifiez la connexion internet).");
@@ -1559,8 +1586,10 @@ function tryInitFirebase(configStr){
   }
   try{
     const config = JSON.parse(configStr);
-    firebase.initializeApp(config);
+    if(!firebase.apps.length) firebase.initializeApp(config);
     db = firebase.firestore();
+    // Plus fiable sur réseaux mobiles / PWA / proxys
+    try{ db.settings({experimentalAutoDetectLongPolling:true, merge:true}); }catch(e){}
     firebaseReady = true;
     localStorage.setItem('firebaseConfig', configStr);
     return true;
@@ -1573,17 +1602,23 @@ function connectFirebase(){
   const val = document.getElementById('firebaseConfigInput').value.trim();
   if(!val){ alert('Collez la config Firebase (JSON) d\'abord.'); return; }
   if(tryInitFirebase(val)){
-    updateFirebaseStatus();
-    loadStateFromFirestore().then(()=>{ renderAll(); });
-    alert('Connecté à Firestore. Les données vont maintenant se synchroniser automatiquement.');
+    loadStateFromFirestore().then(ok=>{
+      updateFirebaseStatus();
+      renderAll();
+      alert(ok ? 'Connecté à Firestore. Les données vont maintenant se synchroniser automatiquement.'
+               : 'Config enregistrée, mais Firestore est inaccessible :\n' + (syncError||'erreur inconnue'));
+    });
   }
 }
 function updateFirebaseStatus(){
   const el = document.getElementById('firebaseStatus');
   if(!el) return;
-  el.textContent = firebaseReady
-    ? 'Connecté ✓' + (typeof firebase!=='undefined' && firebase.apps.length ? ' (projet : ' + (firebase.app().options.projectId||'—') + ')' : '')
-    : 'Non connecté — mode local (données en mémoire uniquement)';
+  const proj = (typeof firebase!=='undefined' && firebase.apps.length) ? (firebase.app().options.projectId||'—') : '—';
+  el.textContent = firebaseReady && remoteLoaded
+    ? 'Connecté ✓ (projet : ' + proj + ')'
+    : firebaseReady
+      ? 'Firestore inaccessible — ' + (syncError || 'nouvelle tentative en cours…')
+      : 'Non connecté — mode local (données en mémoire uniquement)';
   const ok = document.getElementById('firebaseSyncOk');
   const adv = document.getElementById('firebaseAdvanced');
   const warn = document.getElementById('firebaseNotConnectedWarning');
@@ -1598,65 +1633,128 @@ function toggleAdvancedFirebase(){
 }
 
 /* ---- Synchronisation des données avec Firestore ----
-   Tout est stocké dans un seul document (app/state) pour rester simple.
-   Les photos et documents joints des élèves restent LOCAUX uniquement
-   (non synchronisés) car ils peuvent dépasser la limite de taille d'un
-   document Firestore (1 Mo) — à faire évoluer vers Firebase Storage
-   si besoin de les partager entre appareils. */
-function stateForSync(){
-  return {
+   Tout est stocké dans un seul document (app/state). Les photos et documents
+   joints des élèves restent LOCAUX (limite de 1 Mo par document Firestore).
+   Garanties :
+   - on n'ÉCRIT jamais tant qu'une première LECTURE n'a pas réussi (sinon un
+     état vide local écraserait les données du serveur) ;
+   - les écritures sont regroupées (debounce), sérialisées, et ignorées si rien
+     n'a changé ;
+   - les modifications venant d'un autre appareil sont reçues en direct. */
+function stateCore(){
+  // Le va-et-vient JSON retire les `undefined` (refusés par Firestore).
+  return JSON.parse(JSON.stringify({
     CLASSES,
     ELEVES: ELEVES.map(e=>{ const {photo, documents, ...rest} = e; return rest; }),
     DOSSIERS,
     ENSEIGNANTS,
     NOTES,
     EXAMENS,
-    USERS,
-    updatedAt: new Date().toISOString()
-  };
+    USERS
+  }));
 }
-async function loadStateFromFirestore(){
-  if(!firebaseReady || !db) return;
-  try{
-    const snap = await db.collection('app').doc('state').get();
-    if(snap.exists){
-      const data = snap.data();
-      if(data.CLASSES) CLASSES = data.CLASSES;
-      if(data.ELEVES) ELEVES = data.ELEVES.map(e=>({photo:null, documents:[], ...e}));
-      if(data.DOSSIERS) DOSSIERS = data.DOSSIERS;
-      if(data.ENSEIGNANTS) ENSEIGNANTS = data.ENSEIGNANTS;
-      if(data.NOTES) NOTES = data.NOTES;
-      if(data.EXAMENS) EXAMENS = data.EXAMENS;
-      if(data.USERS){
-        const existingIds = new Set(USERS.map(u=>u.id));
-        const newUsers = data.USERS.filter(u=>!existingIds.has(u.id));
-        USERS.push(...newUsers);
-      }
-    }
-  }catch(err){
-    console.error('Chargement Firestore impossible :', err);
+function stateJson(){ return JSON.stringify(stateCore()); }
+
+function applyRemoteState(data){
+  const local = new Map(ELEVES.map(e=>[e.id, e]));
+  if(data.CLASSES) CLASSES = data.CLASSES;
+  if(data.ELEVES) ELEVES = data.ELEVES.map(e=>{ const l = local.get(e.id) || {}; return {photo:l.photo||null, documents:l.documents||[], ...e}; });
+  if(data.DOSSIERS) DOSSIERS = data.DOSSIERS;
+  if(data.ENSEIGNANTS) ENSEIGNANTS = data.ENSEIGNANTS;
+  if(data.NOTES) NOTES = data.NOTES;
+  if(data.EXAMENS) EXAMENS = data.EXAMENS;
+  if(data.USERS){
+    // Le serveur fait foi (mots de passe réinitialisés inclus) ; on garde le
+    // compte développeur par défaut et les comptes purement locaux.
+    const devDefault = USERS.find(u=>u.id==='dev-default');
+    const remote = data.USERS.filter(u=>u.id !== 'dev-default');
+    const remoteIds = new Set(remote.map(u=>u.id));
+    const localOnly = USERS.filter(u=>u.id!=='dev-default' && !remoteIds.has(u.id));
+    USERS = [ ...(devDefault ? [devDefault] : []), ...remote, ...localOnly ];
+    saveUsersToLocal();
   }
 }
+
 let saveTimer = null;
+let saving = false;
+let pendingResave = false;
+let lastSavedJson = null;     // dernier état connu côté serveur (sans updatedAt)
+let lastWriteStamp = null;    // pour ignorer l'écho de nos propres écritures
 let lastSyncTime = null;
+let loadPromise = null;
+let lastAlertAt = 0;
+
+function setSyncError(err, notify){
+  const code = err && err.code || '';
+  syncError =
+    code === 'permission-denied' ? 'accès refusé par les règles Firestore (autorisez lecture/écriture sur app/state)' :
+    code === 'unavailable' || code === 'failed-precondition' ? 'pas de connexion à Firestore' :
+    code === 'invalid-argument' ? 'données invalides : ' + err.message :
+    (err && err.message) || String(err);
+  console.error('Firestore :', code, err);
+  updateSyncStatus();
+  if(notify && Date.now() - lastAlertAt > 60000){
+    lastAlertAt = Date.now();
+    alert('Erreur Firestore : ' + syncError);
+  }
+}
+
+function startRemoteListener(){
+  if(unsubscribeRemote || !db) return;
+  unsubscribeRemote = STATE_REF().onSnapshot(snap=>{
+    if(!snap.exists || snap.metadata.hasPendingWrites) return;
+    const data = snap.data();
+    if(data.updatedAt && data.updatedAt === lastWriteStamp) return;  // notre propre écriture
+    if(stateJson() !== lastSavedJson) return;                        // modifs locales en attente : elles passent en premier
+    applyRemoteState(data);
+    lastSavedJson = stateJson();
+    lastSyncTime = new Date();
+    if(currentUser) renderAll(); else updateSyncStatus();
+  }, err=>{ unsubscribeRemote = null; setSyncError(err, false); });
+}
+
+function loadStateFromFirestore(){
+  if(!firebaseReady || !db) return Promise.resolve(false);
+  if(loadPromise) return loadPromise;
+  loadPromise = (async ()=>{
+    try{
+      const snap = await STATE_REF().get({source:'server'});
+      if(snap.exists){
+        applyRemoteState(snap.data());
+        lastSavedJson = stateJson();
+      } else {
+        lastSavedJson = null;           // document absent : la première sauvegarde le créera
+      }
+      remoteLoaded = true;
+      syncError = null;
+      lastSyncTime = new Date();
+      startRemoteListener();
+      return true;
+    }catch(err){
+      remoteLoaded = false;
+      setSyncError(err, false);
+      return false;
+    }finally{
+      loadPromise = null;
+    }
+  })();
+  return loadPromise;
+}
 
 function updateSyncStatus(){
   const el = document.getElementById('syncStatus');
   const icon = document.getElementById('syncIcon');
   const text = document.getElementById('syncText');
   if(!el) return;
-  
   if(!firebaseReady || !db){
-    el.className = 'offline';
-    icon.textContent = '⊙';
-    text.textContent = 'Hors ligne';
+    el.className = 'offline'; icon.textContent = '⊙'; text.textContent = 'Hors ligne'; el.title = '';
+  } else if(syncError){
+    el.className = 'error'; icon.textContent = '⚠'; text.textContent = 'Erreur de sync'; el.title = syncError;
   } else {
-    el.className = 'synced';
-    icon.textContent = '✓';
+    el.className = 'synced'; icon.textContent = '✓'; el.title = '';
     if(lastSyncTime){
-      const now = new Date();
-      const diff = Math.round((now - lastSyncTime) / 1000);
-      text.textContent = diff < 60 ? 'À l\'instant' : diff < 3600 ? `Il y a ${diff}s` : 'Synchronisé';
+      const diff = Math.round((Date.now() - lastSyncTime) / 1000);
+      text.textContent = diff < 60 ? 'À l\'instant' : diff < 3600 ? `Il y a ${Math.round(diff/60)} min` : 'Synchronisé';
     } else {
       text.textContent = 'Connecté';
     }
@@ -1676,27 +1774,66 @@ function showSyncing(){
 function scheduleSave(){
   if(!firebaseReady || !db) return;
   clearTimeout(saveTimer);
-  showSyncing();
-  saveTimer = setTimeout(saveStateToFirestore, 800);
+  saveTimer = setTimeout(saveStateToFirestore, 400);
 }
 
 async function saveStateToFirestore(){
-  if(!firebaseReady || !db) return;
+  if(!firebaseReady || !db) return false;
+  clearTimeout(saveTimer);
+  if(saving){ pendingResave = true; return false; }
+  if(!remoteLoaded){
+    // Jamais d'écriture avant une lecture réussie : on évite d'écraser le serveur.
+    const ok = await loadStateFromFirestore();
+    if(!ok){ setSyncError({message: syncError || 'lecture impossible'}, true); return false; }
+  }
+  const json = stateJson();
+  if(json === lastSavedJson) return true;       // rien à écrire
+  saving = true;
+  showSyncing();
   try{
-    await db.collection('app').doc('state').set(stateForSync());
+    const payload = {...JSON.parse(json), updatedAt: new Date().toISOString()};
+    lastWriteStamp = payload.updatedAt;
+    await STATE_REF().set(payload);
+    lastSavedJson = json;
     lastSyncTime = new Date();
-    updateSyncStatus();
+    syncError = null;
+    return true;
   }catch(err){
-    console.error('Sauvegarde Firestore impossible :', err);
+    setSyncError(err, true);
+    return false;
+  }finally{
+    saving = false;
     updateSyncStatus();
+    if(pendingResave){ pendingResave = false; scheduleSave(); }
   }
 }
+
+// Filet de sécurité : rattrape toute modification qui n'a pas appelé renderAll(),
+// relance la lecture si elle avait échoué, et sauvegarde quand la page se ferme.
+setInterval(()=>{
+  if(!firebaseReady) return;
+  if(!remoteLoaded){
+    loadStateFromFirestore().then(ok=>{ if(ok){ if(currentUser) renderAll(); updateFirebaseStatus(); } });
+  } else {
+    scheduleSave();
+  }
+  updateSyncStatus();
+}, 5000);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'hidden') saveStateToFirestore(); });
+window.addEventListener('pagehide', ()=>{ saveStateToFirestore(); });
+window.addEventListener('online', ()=>{ if(!remoteLoaded) loadStateFromFirestore().then(()=>{ if(currentUser) renderAll(); }); else scheduleSave(); });
+
 (function(){
   const saved = localStorage.getItem('firebaseConfig');
   const ok = saved ? tryInitFirebase(saved) : tryInitFirebase(JSON.stringify(DEFAULT_FIREBASE_CONFIG));
   if(ok){
-    loadStateFromFirestore().finally(()=>{ updateFirebaseStatus(); updateSyncStatus(); showLoginScreen(); });
+    loadStateFromFirestore().finally(()=>{
+      updateFirebaseStatus();
+      showLoginScreen();
+      console.log('Firestore :', remoteLoaded ? 'CONNECTÉ (lecture OK)' : 'ERREUR — ' + syncError);
+    });
   } else {
+    console.error('✗ Firebase initialization FAILED - data will NOT be saved');
     showLoginScreen();
   }
 })();
@@ -1790,8 +1927,20 @@ function nativeShare(){
   navigator.share({title:'Hôtellerie', text:'Accédez à Hôtellerie :', url: appShareUrl()}).catch(()=>{});
 }
 
-// Mise à jour en direct de l'indicateur de synchronisation toutes les secondes
-setInterval(updateSyncStatus, 1000);
+// Mise à jour en direct de l'indicateur de synchronisation + horloge
+setInterval(()=>{
+  updateSyncStatus();
+  updateRealtimeClock();
+}, 1000);
+
+function updateRealtimeClock(){
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  const s = String(now.getSeconds()).padStart(2, '0');
+  const el = document.getElementById('realtimeClock');
+  if(el) el.textContent = `${h}:${m}:${s}`;
+}
 </script>
 </body>
 </html>
